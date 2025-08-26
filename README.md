@@ -3,7 +3,7 @@
 [![CI](https://github.com/rawatprince/SpecOps/actions/workflows/ci.yml/badge.svg)](https://github.com/rawatprince/SpecOps/actions/workflows/ci.yml)
 ![Java](https://img.shields.io/badge/java-17%2B-blue)
 ![Burp](https://img.shields.io/badge/Burp-2023.1%2B-orange)
-![License](https://img.shields.io/github/license/rawatprince/SpecOps)
+![License](https://img.shields.io/github/license/rawatprince/SpecOps?cacheSeconds=300)
 ![Release](https://img.shields.io/github/v/release/rawatprince/SpecOps?display_name=tag&sort=semver)
 
 **SpecOps** is a Burp Suite extension that ingests an OpenAPI or Swagger spec and instantly builds a workbench to test every documented endpoint.
