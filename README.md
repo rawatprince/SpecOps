@@ -35,7 +35,7 @@ See the full **[Wiki Guide](../../wiki)** for screenshots and detailed usage.
 ### Method 2: Build from Source
 1. Clone the repository:
    ```bash
-   git clone [https://github.com/rawatprince/SpecOps.git](https://github.com/rawatprince/SpecOps.git)
+   git clone https://github.com/rawatprince/SpecOps.git
    cd SpecOps
    ```
 2. Build the project using Gradle:
