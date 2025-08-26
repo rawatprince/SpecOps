@@ -36,7 +36,9 @@ tasks.withType<Jar>().configureEach {
 tasks.withType<ShadowJar> {
     archiveBaseName.set("SpecOps")
     archiveVersion.set("v${project.version}")
-    archiveClassifier.set("") // no "-all" suffix
+    archiveClassifier.set("")
+    from("LICENSE")
+    from("NOTICE")
 
     dependencies {
         exclude(dependency("net.portswigger.burp.extensions:montoya-api:.*"))
