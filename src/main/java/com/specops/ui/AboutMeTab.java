@@ -34,17 +34,19 @@ public class AboutMeTab extends JPanel {
 
             <h3 style='margin:12px 0 6px 0;'>Features</h3>
             <ul style='margin-top:4px;'>
-              <li>Parse OpenAPI specs from file or URL and generate ready-to-use Burp requests</li>
-              <li>Global Parameter Store with CSV or JSON import or export</li>
-              <li>Auth helpers for apiKey, bearer, and basic</li>
-              <li>Custom Headers applied after auth so user overrides win</li>
-              <li>Endpoints workbench and results viewer integrated with core Burp tools</li>
+                <li>Import specs from file, URL, or paste</li>
+                <li>Global parameter store with import or export, proxy auto fill, and value generation</li>
+                <li>Auth profiles for API keys, Bearer or JWT, Basic, OAuth2</li>
+                <li>Custom header rules with scopes and overwrite control</li>
+                <li>Endpoints workbench with preview, bulk ping, Repeater or Intruder send</li>
+                <li>Attack results with request and response viewers</li>
+                <li>Multi server mode to hit every server defined in the spec</li>
             </ul>
 
             <h3 style='margin:12px 0 6px 0;'>Docs and links</h3>
             <ul style='margin-top:4px;'>
-              <li><a href='https://github.com/rawatprince'>GitHub repository</a></li>
-              <li><a href='https://github.com/rawatprince'>Releases</a></li>
+              <li><a href='https://github.com/rawatprince/SpecOps'>GitHub repository</a></li>
+              <li><a href='https://github.com/rawatprince/SpecOps/releases'>Releases</a></li>
             </ul>
 
             <h3 style='margin:12px 0 6px 0;'>Author</h3>
@@ -58,7 +60,7 @@ public class AboutMeTab extends JPanel {
             </div>
 
             <div style='margin-top:14px;color:#777;font-size:11px;'>
-              Built for Burp Suite. Java 21 recommended. If this tool saves you time, consider a star on GitHub.
+              Built for Burp Suite. If this tool saves you time, consider a star on GitHub.
             </div>
           </body>
         </html>
