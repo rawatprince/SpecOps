@@ -23,7 +23,7 @@ See the full **[Wiki Guide](../../wiki)** for screenshots and detailed usage.
 ## Installation
 
 ### Prerequisites
-- Burp Suite **2023.1+** (for Montoya API support).
+- Burp Suite **2025.7+** (for Montoya API support).
 - Java **17+**.
 
 ### Method 1: Prebuilt Release (Recommended)
