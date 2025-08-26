@@ -1,5 +1,8 @@
 package com.specops.ui;
 
+import burp.api.montoya.http.Http;
+import burp.api.montoya.http.message.requests.HttpRequest;
+import burp.api.montoya.http.message.responses.HttpResponse;
 import com.specops.SpecOpsContext;
 import com.specops.services.openapi.OpenApiParser;
 
@@ -9,8 +12,6 @@ import java.awt.*;
 import java.io.BufferedReader;
 import java.io.File;
 import java.io.FileReader;
-import java.io.InputStreamReader;
-import java.net.HttpURLConnection;
 import java.net.URL;
 
 /**
@@ -105,45 +106,59 @@ public class SpecificationTab extends JPanel {
     }
 
     private void loadFromUrl() {
-        String urlString = JOptionPane.showInputDialog(this, "Enter the URL of the specification file:", "Load from URL", JOptionPane.PLAIN_MESSAGE);
-        if (urlString != null && !urlString.trim().isEmpty()) {
-            specArea.setText("Loading from " + urlString + "...");
-            new SwingWorker<String, Void>() {
-                @Override
-                protected String doInBackground() throws Exception {
-                    URL url = new URL(urlString.trim());
+        String urlString = JOptionPane.showInputDialog(
+                this, "Enter the URL of the specification file:", "Load from URL", JOptionPane.PLAIN_MESSAGE);
 
+        if (urlString == null || urlString.trim().isEmpty()) {
+            return;
+        }
+
+        specArea.setText("Loading from " + urlString + "...");
+
+        new SwingWorker<String, Void>() {
+            @Override
+            protected String doInBackground() {
+                try {
+                    // Record base host for later
+                    URL url = new URL(urlString.trim());
                     String host = url.getProtocol() + "://" + url.getHost() + (url.getPort() == -1 ? "" : ":" + url.getPort());
                     context.setApiHost(host);
 
-                    HttpURLConnection connection = (HttpURLConnection) url.openConnection();
-                    connection.setRequestMethod("GET");
-                    connection.setConnectTimeout(10000);
-                    connection.setReadTimeout(10000);
-                    connection.setInstanceFollowRedirects(true);
-                    StringBuilder content = new StringBuilder();
-                    try (BufferedReader reader = new BufferedReader(new InputStreamReader(connection.getInputStream()))) {
-                        String line;
-                        while ((line = reader.readLine()) != null) {
-                            content.append(line).append("\n");
-                        }
-                    }
-                    return content.toString();
-                }
+                    Http http = context.api.http();
 
-                @Override
-                protected void done() {
-                    try {
-                        specArea.setText(get());
-                        specArea.setCaretPosition(0);
-                    } catch (Exception e) {
-                        context.api.logging().logToError("Failed to load from URL: " + e.getMessage());
-                        specArea.setText("Failed to load from URL: " + e.getMessage());
-                        JOptionPane.showMessageDialog(SpecificationTab.this, "Error loading from URL: " + e.getMessage(), "URL Error", JOptionPane.ERROR_MESSAGE);
+                    HttpRequest request = HttpRequest.httpRequestFromUrl(urlString.trim())
+                            .withHeader("User-Agent", "SpecOps/1.0");
+
+                    HttpResponse resp = http.sendRequest(request).response();
+
+                    int status = resp.statusCode();
+                    if (status < 200 || status >= 300) {
+                        throw new IllegalStateException("HTTP " + status + " when fetching spec");
                     }
+
+                    return resp.bodyToString();
+                } catch (Exception ex) {
+                    context.api.logging().logToError("Failed to load from URL via Montoya: " + ex);
+                    throw new RuntimeException(ex);
                 }
-            }.execute();
-        }
+            }
+
+            @Override
+            protected void done() {
+                try {
+                    specArea.setText(get());
+                    specArea.setCaretPosition(0);
+                } catch (Exception e) {
+                    specArea.setText("Failed to load from URL: " + e.getMessage());
+                    JOptionPane.showMessageDialog(
+                            SpecificationTab.this,
+                            "Error loading from URL: " + e.getMessage(),
+                            "URL Error",
+                            JOptionPane.ERROR_MESSAGE
+                    );
+                }
+            }
+        }.execute();
     }
 
     private void parseSpecification() {
@@ -163,14 +178,12 @@ public class SpecificationTab extends JPanel {
             @Override
             protected void done() {
                 try {
-                    if (get()) { // The 'get()' method retrieves the result from doInBackground().
+                    if (get()) {
                         JOptionPane.showMessageDialog(SpecificationTab.this, "Specification parsed successfully!\n"
                                 + context.getEndpoints().size() + " endpoints found.", "Success", JOptionPane.INFORMATION_MESSAGE);
-                        // If a success callback is registered, run it.
                         if (successCallback != null) {
                             successCallback.run();
                         }
-                        // Guide the user to the next logical step.
                         mainPane.setSelectedIndex(1);
                     } else {
                         JOptionPane.showMessageDialog(SpecificationTab.this, "Failed to parse the specification. See the extension output for details.", "Parsing Error", JOptionPane.ERROR_MESSAGE);
