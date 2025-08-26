@@ -1,0 +1,21 @@
+name: "Feature request"
+description: "Propose an enhancement"
+title: "[feat] <short description>"
+labels: ["enhancement", "needs-design"]
+body:
+  - type: textarea
+    id: problem
+    attributes:
+      label: Problem statement
+      description: What pain are you solving for pentesters
+    validations:
+      required: true
+  - type: textarea
+    id: proposal
+    attributes:
+      label: Proposed solution
+      placeholder: Describe UI and workflow
+  - type: input
+    id: spec
+    attributes:
+      label: Link to example OpenAPI that benefits

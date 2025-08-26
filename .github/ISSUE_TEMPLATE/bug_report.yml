@@ -1,0 +1,125 @@
+name: "Bug report"
+description: "Something in SpecOps is broken"
+title: "[bug] <short description>"
+labels: ["bug", "triage"]
+assignees: ["rawatprince"]
+
+body:
+  - type: markdown
+    attributes:
+      value: "⚠️ Please do not share sensitive credentials, tokens, or secrets."
+
+  - type: checkboxes
+    id: preflight
+    attributes:
+      label: Preflight checklist
+      options:
+        - label: I am using the latest release
+          required: true
+        - label: I searched existing issues and discussions
+          required: true
+
+  - type: input
+    id: specops_version
+    attributes:
+      label: SpecOps version
+      placeholder: e.g. v0.1.2
+    validations:
+      required: true
+
+  - type: input
+    id: java_version
+    attributes:
+      label: Java version
+      placeholder: e.g. 17
+    validations:
+      required: true
+
+  - type: input
+    id: burp_version
+    attributes:
+      label: Burp Suite version
+      placeholder: e.g. 2025.8
+    validations:
+      required: true
+
+  - type: dropdown
+    id: burp_edition
+    attributes:
+      label: Burp Edition
+      options:
+        - Community
+        - Professional
+
+  - type: input
+    id: os_version
+    attributes:
+      label: OS and version
+      placeholder: e.g. Windows 11, macOS Sonoma 14.5, Ubuntu 22.04
+    validations:
+      required: true
+
+  - type: dropdown
+    id: reproducibility
+    attributes:
+      label: How often does this happen?
+      options:
+        - Always
+        - Sometimes
+        - Rarely
+
+  - type: checkboxes
+    id: context
+    attributes:
+      label: Where did this issue occur?
+      options:
+        - label: While loading the specification
+        - label: While configuring servers
+        - label: While editing global parameters
+        - label: While setting auth profiles
+        - label: While adding custom headers
+        - label: While sending requests (Endpoints Workbench)
+        - label: While reviewing results (Attack Results)
+
+  - type: textarea
+    id: repro
+    attributes:
+      label: Steps to reproduce
+      description: Minimal, complete, reproducible example
+      placeholder: |
+        1) Load spec URL ...
+        2) Click ...
+        3) Observe ...
+    validations:
+      required: true
+
+  - type: textarea
+    id: expected
+    attributes:
+      label: Expected behavior
+      placeholder: "What did you expect to happen?"
+
+  - type: textarea
+    id: actual
+    attributes:
+      label: Actual behavior
+      placeholder: "What actually happened instead?"
+
+  - type: textarea
+    id: screenshots
+    attributes:
+      label: Screenshots
+      description: Add screenshots if they help explain the problem
+
+  - type: textarea
+    id: logs
+    attributes:
+      label: Logs
+      description: Paste error logs (if any)
+      render: shell
+
+  - type: textarea
+    id: notes
+    attributes:
+      label: Additional context
+      description: Add any other details that might help us understand the problem

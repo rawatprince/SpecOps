@@ -1,0 +1,66 @@
+name: CI
+
+on:
+  push:
+    branches: [ main, 'feature/*' ]
+  pull_request:
+    branches: [ main, 'feature/*' ]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    name: Build and test
+    runs-on: ubuntu-latest
+    strategy:
+      matrix:
+        java: [ '17' ]
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup Java
+        uses: actions/setup-java@v4
+        with:
+          distribution: temurin
+          java-version: ${{ matrix.java }}
+          cache: gradle
+
+      - name: Setup Gradle
+        uses: gradle/actions/setup-gradle@v3
+
+      - name: Make gradlew executable
+        run: chmod +x gradlew
+
+      - name: Build with tests
+        run: ./gradlew --no-daemon clean test shadowJar
+
+      - name: Upload test report
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: test-report-${{ github.sha }}
+          path: build/reports/tests/test/**
+          retention-days: 7
+
+      - name: Upload fat jar
+        if: success()
+        uses: actions/upload-artifact@v4
+        with:
+          name: specops-${{ github.ref_name }}-${{ github.sha }}
+          path: build/libs/SpecOps-v*.jar
+          if-no-files-found: error
+          retention-days: 7
+
+      - name: Job summary
+        if: always()
+        run: |
+          echo "## SpecOps CI summary" >> $GITHUB_STEP_SUMMARY
+          echo "- Java: ${{ matrix.java }}" >> $GITHUB_STEP_SUMMARY
+          echo "- Fat jar: uploaded on success to the run artifacts" >> $GITHUB_STEP_SUMMARY
