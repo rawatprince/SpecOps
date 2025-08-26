@@ -8,6 +8,8 @@
 
 **SpecOps** is a Burp Suite extension that ingests an OpenAPI or Swagger spec and instantly builds a workbench to test every documented endpoint.
 
+![SpecOpsDemo](https://github.com/rawatprince/SpecOps/wiki/images/SpecOpsDemo.gif)
+
 ## Features
 
 - Import specs from file, URL, or paste
