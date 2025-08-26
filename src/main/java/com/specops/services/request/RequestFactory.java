@@ -1115,15 +1115,27 @@ public class RequestFactory {
 
                 Object val = parseScalarOrJson(p.getValue());
 
-                if ("array".equals(kind) && !(val instanceof java.util.List)) {
+                // 1) Do NOT wrap unless we are setting the entire array variable itself
+                //    Whole array means the path is exactly the top-level key, so tokens.size() == 1.
+                boolean settingWholeArray = tokens.size() == 1;
+
+                if ("array".equals(kind) && settingWholeArray && !(val instanceof java.util.List)) {
                     val = java.util.List.of(val);
                 }
 
+                // 2) If value is an empty string, skip the override
+                //  This prevents wiping out the spec example "string" for photoUrls[0].
+                if (val instanceof String && ((String) val).isEmpty()) {
+                    continue;
+                }
+
+                // If setting a whole object key with a scalar, ignore
                 if ("object".equals(kind) && tokens.size() == 1 && !(val instanceof java.util.Map)) {
                     continue;
                 }
 
                 setJsonPathValue(root, normalized, val);
+
             }
             return Json.mapper().writeValueAsString(root);
         } catch (Throwable t) {
