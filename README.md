@@ -46,3 +46,15 @@ See the full **[Wiki Guide](../../wiki)** for screenshots and detailed usage.
 ## Why SpecOps?
 SpecOps turns static API specifications into a **dynamic attack surface** - removing the friction of manual request building and letting you focus on testing.  
 With its parameter store, auth handling, custom headers, and bulk testing features, SpecOps makes API pentesting **faster, consistent, and far more powerful**.
+
+---
+
+## Links
+
+- **Website**: [https://princerawat.com](https://princerawat.com)
+- **User's manual**: [SpecOps Wiki](https://github.com/rawatprince/SpecOps/wiki)
+- **Screenshots**: [View Screenshots](https://github.com/rawatprince/SpecOps/wiki/Screenshots)
+- **Releases**: [Download SpecOps](https://github.com/rawatprince/SpecOps/releases)
+- **Commits feed (RSS/Atom)**: [SpecOps commits](https://github.com/rawatprince/SpecOps/commits/main.atom)
+- **X (Twitter)**: [@_princerawat](https://x.com/_princerawat)
+- **LinkedIn**: [Prince Rawat](https://www.linkedin.com/in/princerawat/)
