@@ -60,3 +60,12 @@ With its parameter store, auth handling, custom headers, and bulk testing featur
 - **Commits feed (RSS/Atom)**: [SpecOps commits](https://github.com/rawatprince/SpecOps/commits/main.atom)
 - **X (Twitter)**: [@_princerawat](https://x.com/_princerawat)
 - **LinkedIn**: [Prince Rawat](https://www.linkedin.com/in/princerawat/)
+
+---
+
+If you like **SpecOps**, please consider giving it a ⭐ on GitHub, it helps others discover the project!  
+
+Welcoming contributions from everyone:  
+- Open [issues](https://github.com/rawatprince/SpecOps/issues) for bugs or feature requests  
+- Submit pull requests to improve the project  
+- Share ideas or suggestions  
