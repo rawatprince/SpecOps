@@ -41,6 +41,11 @@ jobs:
       - name: Build with tests
         run: ./gradlew --no-daemon clean test shadowJar
 
+      - name: Sanitize ref name for artifact
+        run: |
+          SAFE_REF_NAME="${GITHUB_REF_NAME//\//-}"
+          echo "SAFE_REF_NAME=$SAFE_REF_NAME" >> "$GITHUB_ENV"
+
       - name: Upload test report
         if: always()
         uses: actions/upload-artifact@v4
@@ -53,7 +58,7 @@ jobs:
         if: success()
         uses: actions/upload-artifact@v4
         with:
-          name: specops-${{ github.ref_name }}-${{ github.sha }}
+          name: specops-${{ env.SAFE_REF_NAME }}-${{ github.sha }}
           path: build/libs/SpecOps-v*.jar
           if-no-files-found: error
           retention-days: 7
