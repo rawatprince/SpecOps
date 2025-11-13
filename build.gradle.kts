@@ -15,9 +15,9 @@ repositories {
 }
 
 dependencies {
-    compileOnly("net.portswigger.burp.extensions:montoya-api:2025.8")
-    implementation("io.swagger.parser.v3:swagger-parser:2.1.32")
-    implementation("io.swagger.parser.v3:swagger-parser-v2-converter:2.1.32")
+    compileOnly("net.portswigger.burp.extensions:montoya-api:2025.11")
+    implementation("io.swagger.parser.v3:swagger-parser:2.1.35")
+    implementation("io.swagger.parser.v3:swagger-parser-v2-converter:2.1.35")
 }
 
 java {
