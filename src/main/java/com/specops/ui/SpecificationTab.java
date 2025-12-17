@@ -11,7 +11,8 @@ import javax.swing.filechooser.FileNameExtensionFilter;
 import java.awt.*;
 import java.io.BufferedReader;
 import java.io.File;
-import java.io.FileReader;
+import java.nio.file.Files;
+import java.nio.charset.StandardCharsets;
 import java.net.URL;
 
 /**
@@ -82,10 +83,10 @@ public class SpecificationTab extends JPanel {
                 @Override
                 protected String doInBackground() throws Exception {
                     StringBuilder content = new StringBuilder();
-                    try (BufferedReader reader = new BufferedReader(new FileReader(selectedFile))) {
+                    try (BufferedReader reader = Files.newBufferedReader(selectedFile.toPath(), StandardCharsets.UTF_8)) {
                         String line;
                         while ((line = reader.readLine()) != null) {
-                            content.append(line).append("\n");
+                            content.append(line).append(System.lineSeparator());
                         }
                     }
                     return content.toString();
@@ -136,7 +137,8 @@ public class SpecificationTab extends JPanel {
                         throw new IllegalStateException("HTTP " + status + " when fetching spec");
                     }
 
-                    return resp.bodyToString();
+                    byte[] bodyBytes = resp.body().getBytes();
+                    return new String(bodyBytes, StandardCharsets.UTF_8);
                 } catch (Exception ex) {
                     context.api.logging().logToError("Failed to load from URL via Montoya: " + ex);
                     throw new RuntimeException(ex);
