@@ -36,7 +36,7 @@ public class MainTab extends JPanel {
         tabbedPane.addTab("5. Custom Headers", customHeadersTab);
         tabbedPane.addTab("6. Endpoints Workbench", endpointsTab);
         tabbedPane.addTab("7. Attack Results", resultsTab);
-        tabbedPane.addTab("About", new AboutMeTab("SpecOps", "1.1.3"));
+        tabbedPane.addTab("About", new AboutMeTab("SpecOps", "1.2.0"));
 
 
         add(tabbedPane, BorderLayout.CENTER);
