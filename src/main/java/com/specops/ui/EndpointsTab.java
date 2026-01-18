@@ -26,6 +26,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
+import java.util.concurrent.atomic.AtomicBoolean;
+import java.util.concurrent.atomic.AtomicInteger;
 
 /**
  * Endpoints workbench with cancellable bulk pings, progress, and ETA.
@@ -45,11 +47,17 @@ public class EndpointsTab extends JPanel {
 
     private final JButton btnPing;
     private final JButton btnCancel;
+    private final JButton btnPause;
     private final JProgressBar progressBar;
     private final JLabel etaLabel;
     private final JLabel countLabel;
+    private final JLabel statusLabel;
 
     private SwingWorker<Void, AttackResult> activeWorker;
+
+    private final AtomicBoolean pauseRequested = new AtomicBoolean(false);
+    private final AtomicBoolean stopAfterCurrent = new AtomicBoolean(false);
+    private final Object pauseLock = new Object();
 
     public EndpointsTab(SpecOpsContext context, JTabbedPane mainPane) {
         this.context = context;
@@ -63,8 +71,10 @@ public class EndpointsTab extends JPanel {
         JPanel toolbar = new JPanel(new FlowLayout(FlowLayout.LEFT, 8, 0));
 
         btnPing = new JButton("Ping Selected");
-        btnCancel = new JButton("Cancel");
+        btnCancel = new JButton("Stop After Current");
         btnCancel.setEnabled(false);
+        btnPause = new JButton("Pause");
+        btnPause.setEnabled(false);
 
         progressBar = new JProgressBar(0, 100);
         progressBar.setStringPainted(true);
@@ -72,14 +82,18 @@ public class EndpointsTab extends JPanel {
 
         etaLabel = new JLabel("ETA: --:--");
         countLabel = new JLabel("0 / 0");
+        statusLabel = new JLabel("Status: Idle");
         filterText = new JTextField(20);
 
         toolbar.add(btnPing);
         toolbar.add(btnCancel);
+        toolbar.add(btnPause);
         toolbar.add(progressBar);
         toolbar.add(countLabel);
         toolbar.add(new JLabel("|"));
         toolbar.add(etaLabel);
+        toolbar.add(new JLabel("|"));
+        toolbar.add(statusLabel);
         toolbar.add(new JLabel("Filter:"));
         toolbar.add(filterText);
 
@@ -142,6 +156,7 @@ public class EndpointsTab extends JPanel {
         // Wire actions
         btnPing.addActionListener(e -> pingSelectedEndpointsWorker());
         btnCancel.addActionListener(e -> cancelActiveJob());
+        btnPause.addActionListener(e -> togglePause());
         setupFilterListener();
 
         // Init counts
@@ -318,18 +333,24 @@ public class EndpointsTab extends JPanel {
         // UI state
         btnPing.setEnabled(false);
         btnCancel.setEnabled(true);
+        btnPause.setEnabled(true);
+        btnPause.setText("Pause");
+        pauseRequested.set(false);
+        stopAfterCurrent.set(false);
         progressBar.setValue(0);
         progressBar.setString("0%");
         countLabel.setText("0 / " + totalCount);
         etaLabel.setText("ETA: --:--");
+        statusLabel.setText("Status: Running");
 
         activeWorker = new SwingWorker<>() {
             @Override
             protected Void doInBackground() {
                 int done = 0;
+                AtomicInteger completedCount = new AtomicInteger(0);
 
                 for (Map.Entry<Endpoint, List<HttpRequest>> entry : plan.entrySet()) {
-                    if (isCancelled()) break;
+                    if (stopAfterCurrent.get()) break;
 
                     Endpoint endpoint = entry.getKey();
                     List<HttpRequest> requests = entry.getValue();
@@ -338,7 +359,8 @@ public class EndpointsTab extends JPanel {
                     }
 
                     for (HttpRequest request : requests) {
-                        if (isCancelled()) break;
+                        waitIfPaused();
+                        if (stopAfterCurrent.get()) break;
 
                         try {
                             var requestResponse = context.api.http().sendRequest(request);
@@ -353,10 +375,14 @@ public class EndpointsTab extends JPanel {
                         }
 
                         done++;
+                        completedCount.set(done);
                         int pct = (int) Math.round((done * 100.0) / totalCount);
                         setProgress(pct);
                         updateCountAndEtaOnEDT(done, totalCount, startNano);
                     }
+                }
+                if (stopAfterCurrent.get() && completedCount.get() < totalCount) {
+                    SwingUtilities.invokeLater(() -> statusLabel.setText("Status: Stopping"));
                 }
                 return null;
             }
@@ -372,16 +398,20 @@ public class EndpointsTab extends JPanel {
             protected void done() {
                 btnPing.setEnabled(true);
                 btnCancel.setEnabled(false);
+                btnPause.setEnabled(false);
+                btnPause.setText("Pause");
+                pauseRequested.set(false);
+                statusLabel.setText("Status: Idle");
 
                 if (mainPane != null) {
                     // Adjust index if your tab order changes
                     mainPane.setSelectedIndex(6);
                 }
 
-                if (isCancelled()) {
+                if (stopAfterCurrent.get()) {
                     JOptionPane.showMessageDialog(EndpointsTab.this,
-                            "Ping cancelled. See Attack Results for partial results.",
-                            "Cancelled", JOptionPane.WARNING_MESSAGE);
+                            "Ping stopped after current request. See Attack Results for partial results.",
+                            "Stopped", JOptionPane.WARNING_MESSAGE);
                 } else {
                     JOptionPane.showMessageDialog(EndpointsTab.this,
                             "Ping complete. See Attack Results for details.",
@@ -426,10 +456,46 @@ public class EndpointsTab extends JPanel {
         return String.format("%02d:%02d", minutes, seconds);
     }
 
+    private void waitIfPaused() {
+        synchronized (pauseLock) {
+            while (pauseRequested.get() && !stopAfterCurrent.get()) {
+                try {
+                    pauseLock.wait();
+                } catch (InterruptedException e) {
+                    Thread.currentThread().interrupt();
+                    break;
+                }
+            }
+        }
+    }
+
     private void cancelActiveJob() {
         if (activeWorker != null && !activeWorker.isDone()) {
-            activeWorker.cancel(true);
+            stopAfterCurrent.set(true);
             btnCancel.setEnabled(false);
+            btnPause.setEnabled(false);
+            pauseRequested.set(false);
+            statusLabel.setText("Status: Stopping");
+            synchronized (pauseLock) {
+                pauseLock.notifyAll();
+            }
+        }
+    }
+
+    private void togglePause() {
+        if (activeWorker == null || activeWorker.isDone()) {
+            return;
+        }
+        if (pauseRequested.compareAndSet(false, true)) {
+            btnPause.setText("Resume");
+            statusLabel.setText("Status: Paused");
+        } else {
+            pauseRequested.set(false);
+            btnPause.setText("Pause");
+            statusLabel.setText("Status: Running");
+            synchronized (pauseLock) {
+                pauseLock.notifyAll();
+            }
         }
     }
 
