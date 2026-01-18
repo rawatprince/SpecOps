@@ -11,6 +11,9 @@ import com.specops.services.request.RequestFactory;
 import com.specops.ui.models.EndpointTableModel;
 
 import javax.swing.*;
+import javax.swing.event.DocumentEvent;
+import javax.swing.event.DocumentListener;
+import javax.swing.RowFilter;
 import javax.swing.table.TableRowSorter;
 import java.awt.*;
 import java.awt.event.MouseAdapter;
@@ -20,6 +23,7 @@ import java.util.ArrayList;
 import java.util.Date;
 import java.util.LinkedHashMap;
 import java.util.List;
+import java.util.Locale;
 import java.util.Map;
 import java.util.concurrent.TimeUnit;
 
@@ -36,6 +40,8 @@ public class EndpointsTab extends JPanel {
     private final HttpRequestEditor requestViewer;
     private final RequestFactory requestFactory;
     private final JTabbedPane mainPane;
+    private final TableRowSorter<EndpointTableModel> sorter;
+    private final JTextField filterText;
 
     private final JButton btnPing;
     private final JButton btnCancel;
@@ -66,6 +72,7 @@ public class EndpointsTab extends JPanel {
 
         etaLabel = new JLabel("ETA: --:--");
         countLabel = new JLabel("0 / 0");
+        filterText = new JTextField(20);
 
         toolbar.add(btnPing);
         toolbar.add(btnCancel);
@@ -73,11 +80,13 @@ public class EndpointsTab extends JPanel {
         toolbar.add(countLabel);
         toolbar.add(new JLabel("|"));
         toolbar.add(etaLabel);
+        toolbar.add(new JLabel("Filter:"));
+        toolbar.add(filterText);
 
         add(toolbar, BorderLayout.NORTH);
 
         tableModel = new EndpointTableModel(context);
-        TableRowSorter<EndpointTableModel> sorter = new TableRowSorter<>(tableModel);
+        sorter = new TableRowSorter<>(tableModel);
         endpointsTable = new JTable(tableModel);
         endpointsTable.setRowSorter(sorter);
         endpointsTable.setSelectionMode(ListSelectionModel.MULTIPLE_INTERVAL_SELECTION);
@@ -133,6 +142,7 @@ public class EndpointsTab extends JPanel {
         // Wire actions
         btnPing.addActionListener(e -> pingSelectedEndpointsWorker());
         btnCancel.addActionListener(e -> cancelActiveJob());
+        setupFilterListener();
 
         // Init counts
         updateCountLabel();
@@ -155,6 +165,54 @@ public class EndpointsTab extends JPanel {
         } else {
             requestViewer.setRequest(null);
         }
+    }
+
+    private void setupFilterListener() {
+        filterText.getDocument().addDocumentListener(new DocumentListener() {
+            public void insertUpdate(DocumentEvent e) { updateFilter(); }
+            public void removeUpdate(DocumentEvent e) { updateFilter(); }
+            public void changedUpdate(DocumentEvent e) { updateFilter(); }
+        });
+    }
+
+    private void updateFilter() {
+        String text = filterText.getText();
+        if (text == null || text.trim().isEmpty()) {
+            sorter.setRowFilter(null);
+        } else {
+            String needle = text.trim().toLowerCase(Locale.ROOT);
+            sorter.setRowFilter(new RowFilter<>() {
+                @Override
+                public boolean include(Entry<? extends EndpointTableModel, ? extends Integer> entry) {
+                    int modelRow = entry.getIdentifier();
+                    Endpoint endpoint = context.getEndpoints().get(modelRow);
+                    return endpoint != null && matchesEndpoint(endpoint, needle);
+                }
+            });
+        }
+        updatePreviewPanels();
+        updateCountLabel();
+    }
+
+    private boolean matchesEndpoint(Endpoint endpoint, String needle) {
+        String method = endpoint.getMethod() != null ? endpoint.getMethod().toString() : "";
+        String path = endpoint.getPath() != null ? endpoint.getPath() : "";
+        String summary = endpoint.getSummary() != null ? endpoint.getSummary() : "";
+        if (method.toLowerCase(Locale.ROOT).contains(needle)
+                || path.toLowerCase(Locale.ROOT).contains(needle)
+                || summary.toLowerCase(Locale.ROOT).contains(needle)) {
+            return true;
+        }
+
+        if (endpoint.getOperation() != null && endpoint.getOperation().getTags() != null) {
+            for (String tag : endpoint.getOperation().getTags()) {
+                if (tag != null && tag.toLowerCase(Locale.ROOT).contains(needle)) {
+                    return true;
+                }
+            }
+        }
+
+        return false;
     }
 
     private List<Endpoint> getSelectedEndpoints() {
