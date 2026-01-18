@@ -8,7 +8,7 @@ plugins {
 
 group = "com.specops"
 
-version = "1.1.2"
+version = "1.1.3"
 
 repositories {
     mavenCentral()
@@ -16,8 +16,8 @@ repositories {
 
 dependencies {
     compileOnly("net.portswigger.burp.extensions:montoya-api:2025.12")
-    implementation("io.swagger.parser.v3:swagger-parser:2.1.36")
-    implementation("io.swagger.parser.v3:swagger-parser-v2-converter:2.1.36")
+    implementation("io.swagger.parser.v3:swagger-parser:2.1.37")
+    implementation("io.swagger.parser.v3:swagger-parser-v2-converter:2.1.37")
 }
 
 java {
