@@ -240,12 +240,19 @@ public class RequestFactory {
         if (context.isIterateAcrossAllServers()) {
             List<String> out = new ArrayList<>();
             for (int i = 0; i < servers.size(); i++) {
-                out.add(resolveServerUrlWithVars(servers.get(i), i));
+                String resolved = resolveServerUrlWithVars(servers.get(i), i);
+                if (resolved != null && !resolved.isBlank()) {
+                    out.add(resolved);
+                }
             }
             return out;
         } else {
             int idx = Math.min(Math.max(context.getSelectedServerIndex(), 0), servers.size() - 1);
-            return List.of(resolveServerUrlWithVars(servers.get(idx), idx));
+            String resolved = resolveServerUrlWithVars(servers.get(idx), idx);
+            if (resolved == null || resolved.isBlank()) {
+                return List.of();
+            }
+            return List.of(resolved);
         }
     }
 
