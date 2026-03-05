@@ -3,7 +3,7 @@ import java.time.Instant
 
 plugins {
     `java-library`
-    id("com.github.johnrengelman.shadow") version "8.1.1"
+    id("com.gradleup.shadow") version "9.3.2"
 }
 
 group = "com.specops"
@@ -15,9 +15,9 @@ repositories {
 }
 
 dependencies {
-    compileOnly("net.portswigger.burp.extensions:montoya-api:2025.12")
-    implementation("io.swagger.parser.v3:swagger-parser:2.1.37")
-    implementation("io.swagger.parser.v3:swagger-parser-v2-converter:2.1.37")
+    compileOnly("net.portswigger.burp.extensions:montoya-api:2026.2")
+    implementation("io.swagger.parser.v3:swagger-parser:2.1.38")
+    implementation("io.swagger.parser.v3:swagger-parser-v2-converter:2.1.38")
 }
 
 java {
