@@ -27,6 +27,7 @@ import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
 import java.nio.file.StandardOpenOption;
+import java.util.concurrent.ExecutionException;
 import java.util.*;
 import java.util.List;
 import java.util.prefs.Preferences;
@@ -61,6 +62,7 @@ public class ParameterStoreTab extends JPanel {
     private static final String PREF_GROUP_KEY = "valueGenerator.groupKey";
 
     private JLabel groupingStatus;
+    private boolean fileIoInProgress;
 
     public ParameterStoreTab(SpecOpsContext context) {
         this.context = context;
@@ -311,6 +313,13 @@ public class ParameterStoreTab extends JPanel {
     private void exportValues() {
         commitEditsIfAny();
 
+        if (fileIoInProgress) {
+            JOptionPane.showMessageDialog(this,
+                    "Another import/export operation is already running.",
+                    "Export Values", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
         JFileChooser fileChooser = new JFileChooser();
         fileChooser.setDialogTitle("Export Parameter Values");
         fileChooser.addChoosableFileFilter(new FileNameExtensionFilter("CSV Files", "csv"));
@@ -323,40 +332,73 @@ public class ParameterStoreTab extends JPanel {
         File file = fileChooser.getSelectedFile();
         String lower = file.getName().toLowerCase();
 
-        try {
-            if (!lower.contains(".")) {
-                file = new File(file.getParentFile(), file.getName() + ".csv");
-                lower = file.getName().toLowerCase();
-            }
-            Path path = file.toPath();
-
-            if (lower.endsWith(".csv")) {
-                writeCsv(path);
-            } else if (lower.endsWith(".json")) {
-                ByteArray content = ValueGenerator.exportValues(context.getGlobalParameterStore());
-                Files.write(path, content.getBytes(),
-                        StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
-            } else {
-                JOptionPane.showMessageDialog(this,
-                        "Unsupported file type. Use .csv or .json",
-                        "Export Error", JOptionPane.ERROR_MESSAGE);
-                return;
-            }
-
-            JOptionPane.showMessageDialog(this,
-                    "Values exported successfully to " + file.getAbsolutePath(),
-                    "Export Successful", JOptionPane.INFORMATION_MESSAGE);
-
-        } catch (IOException ex) {
-            context.api.logging().logToError("Export failed: " + ex.getMessage());
-            JOptionPane.showMessageDialog(this,
-                    "Export failed: " + ex.getMessage(),
-                    "Export Error", JOptionPane.ERROR_MESSAGE);
+        if (!lower.contains(".")) {
+            file = new File(file.getParentFile(), file.getName() + ".csv");
+            lower = file.getName().toLowerCase();
         }
+
+        if (!lower.endsWith(".csv") && !lower.endsWith(".json")) {
+            JOptionPane.showMessageDialog(this,
+                    "Unsupported file type. Use .csv or .json",
+                    "Export Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        final File outputFile = file;
+        final String outputLower = lower;
+        final Path outputPath = outputFile.toPath();
+
+        fileIoInProgress = true;
+        setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                if (outputLower.endsWith(".csv")) {
+                    writeCsv(outputPath);
+                } else {
+                    ByteArray content = ValueGenerator.exportValues(context.getGlobalParameterStore());
+                    Files.write(outputPath, content.getBytes(),
+                            StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
+                }
+                return null;
+            }
+
+            @Override
+            protected void done() {
+                fileIoInProgress = false;
+                setCursor(Cursor.getDefaultCursor());
+                try {
+                    get();
+                    JOptionPane.showMessageDialog(ParameterStoreTab.this,
+                            "Values exported successfully to " + outputFile.getAbsolutePath(),
+                            "Export Successful", JOptionPane.INFORMATION_MESSAGE);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    context.api.logging().logToError("Export interrupted: " + ex.getMessage());
+                    JOptionPane.showMessageDialog(ParameterStoreTab.this,
+                            "Export was interrupted.",
+                            "Export Error", JOptionPane.ERROR_MESSAGE);
+                } catch (ExecutionException ex) {
+                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                    context.api.logging().logToError("Export failed: " + cause.getMessage());
+                    JOptionPane.showMessageDialog(ParameterStoreTab.this,
+                            "Export failed: " + cause.getMessage(),
+                            "Export Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
     }
 
     private void importValues() {
         commitEditsIfAny();
+
+        if (fileIoInProgress) {
+            JOptionPane.showMessageDialog(this,
+                    "Another import/export operation is already running.",
+                    "Import Values", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
 
         JFileChooser fileChooser = new JFileChooser();
         fileChooser.setDialogTitle("Import Parameter Values");
@@ -371,34 +413,54 @@ public class ParameterStoreTab extends JPanel {
         String lower = file.getName().toLowerCase();
         Path path = file.toPath();
 
-        try {
-            int count;
-            if (lower.endsWith(".csv")) {
-                count = importCsv(path);
-            } else if (lower.endsWith(".json")) {
+        if (!lower.endsWith(".csv") && !lower.endsWith(".json")) {
+            JOptionPane.showMessageDialog(this,
+                    "Unsupported file type. Use .csv or .json",
+                    "Import Error", JOptionPane.ERROR_MESSAGE);
+            return;
+        }
+
+        fileIoInProgress = true;
+        setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+
+        new SwingWorker<Integer, Void>() {
+            @Override
+            protected Integer doInBackground() throws Exception {
+                if (lower.endsWith(".csv")) {
+                    return importCsv(path);
+                }
                 byte[] bytes = Files.readAllBytes(path);
                 ByteArray content = ByteArray.byteArray(bytes);
-                count = ValueGenerator.importValues(context.getGlobalParameterStore(), content);
-            } else {
-                JOptionPane.showMessageDialog(this,
-                        "Unsupported file type. Use .csv or .json",
-                        "Import Error", JOptionPane.ERROR_MESSAGE);
-                return;
+                return ValueGenerator.importValues(context.getGlobalParameterStore(), content);
             }
 
-            refreshData();
-            JOptionPane.showMessageDialog(this,
-                    "Successfully imported " + count + " parameter values.",
-                    "Import Successful", JOptionPane.INFORMATION_MESSAGE);
-            emitChanged();
-            parameterTable.requestFocusInWindow();
-
-        } catch (IOException ex) {
-            context.api.logging().logToError("Import failed: " + ex.getMessage());
-            JOptionPane.showMessageDialog(this,
-                    "Import failed: " + ex.getMessage(),
-                    "Import Error", JOptionPane.ERROR_MESSAGE);
-        }
+            @Override
+            protected void done() {
+                fileIoInProgress = false;
+                setCursor(Cursor.getDefaultCursor());
+                try {
+                    int count = get();
+                    refreshData();
+                    JOptionPane.showMessageDialog(ParameterStoreTab.this,
+                            "Successfully imported " + count + " parameter values.",
+                            "Import Successful", JOptionPane.INFORMATION_MESSAGE);
+                    emitChanged();
+                    parameterTable.requestFocusInWindow();
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    context.api.logging().logToError("Import interrupted: " + ex.getMessage());
+                    JOptionPane.showMessageDialog(ParameterStoreTab.this,
+                            "Import was interrupted.",
+                            "Import Error", JOptionPane.ERROR_MESSAGE);
+                } catch (ExecutionException ex) {
+                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                    context.api.logging().logToError("Import failed: " + cause.getMessage());
+                    JOptionPane.showMessageDialog(ParameterStoreTab.this,
+                            "Import failed: " + cause.getMessage(),
+                            "Import Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
     }
 
     private void commitEditsIfAny() {

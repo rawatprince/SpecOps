@@ -19,10 +19,11 @@ import java.awt.*;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
-import java.io.IOException;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
+import java.util.concurrent.ExecutionException;
 
 /**
  * Attack Results with bottom preview, matching Endpoints Workbench layout.
@@ -40,6 +41,7 @@ public class ResultsTab extends JPanel {
     // Bottom preview editors
     private final HttpRequestEditor reqViewer;
     private final HttpResponseEditor respViewer;
+    private boolean exportInProgress;
 
     public ResultsTab(SpecOpsContext context) {
         this.context = context;
@@ -249,6 +251,12 @@ public class ResultsTab extends JPanel {
     }
 
     private void exportResults(ExportFormat format) {
+        if (exportInProgress) {
+            JOptionPane.showMessageDialog(this, "An export is already in progress.", "Export Results",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
         List<AttackResult> results = context.getAttackResults();
         if (results.isEmpty()) {
             JOptionPane.showMessageDialog(this, "No results available to export.", "Export Results",
@@ -270,19 +278,43 @@ public class ResultsTab extends JPanel {
 
         File selectedFile = chooser.getSelectedFile();
         Path outputPath = ensureExtension(selectedFile.toPath(), format.extension);
+        boolean includePayloadData = includePayloads.isSelected();
+        List<AttackResult> resultsSnapshot = new ArrayList<>(results);
 
-        try {
-            if (format == ExportFormat.CSV) {
-                ResultExporter.exportCsv(results, outputPath, includePayloads.isSelected());
-            } else {
-                ResultExporter.exportJson(results, outputPath, includePayloads.isSelected());
+        exportInProgress = true;
+        setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+
+        new SwingWorker<Void, Void>() {
+            @Override
+            protected Void doInBackground() throws Exception {
+                if (format == ExportFormat.CSV) {
+                    ResultExporter.exportCsv(resultsSnapshot, outputPath, includePayloadData);
+                } else {
+                    ResultExporter.exportJson(resultsSnapshot, outputPath, includePayloadData);
+                }
+                return null;
             }
-            JOptionPane.showMessageDialog(this, "Exported results to " + outputPath, "Export Results",
-                    JOptionPane.INFORMATION_MESSAGE);
-        } catch (IOException ex) {
-            JOptionPane.showMessageDialog(this, "Failed to export results: " + ex.getMessage(), "Export Results",
-                    JOptionPane.ERROR_MESSAGE);
-        }
+
+            @Override
+            protected void done() {
+                exportInProgress = false;
+                setCursor(Cursor.getDefaultCursor());
+                try {
+                    get();
+                    JOptionPane.showMessageDialog(ResultsTab.this, "Exported results to " + outputPath,
+                            "Export Results", JOptionPane.INFORMATION_MESSAGE);
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    JOptionPane.showMessageDialog(ResultsTab.this, "Export was interrupted.", "Export Results",
+                            JOptionPane.ERROR_MESSAGE);
+                } catch (ExecutionException ex) {
+                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                    JOptionPane.showMessageDialog(ResultsTab.this,
+                            "Failed to export results: " + cause.getMessage(), "Export Results",
+                            JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
     }
 
     private Path ensureExtension(Path path, String extension) {
