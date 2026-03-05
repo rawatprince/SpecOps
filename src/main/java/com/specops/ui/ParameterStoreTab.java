@@ -57,12 +57,16 @@ public class ParameterStoreTab extends JPanel {
 
     private Action copyCellAction;
     private Action pasteCellAction;
+    private JButton generateValuesButton;
+    private JButton importValuesButton;
+    private JButton clearValuesButton;
 
     private static final Preferences PREFS = Preferences.userNodeForPackage(ParameterStoreTab.class);
     private static final String PREF_GROUP_KEY = "valueGenerator.groupKey";
 
     private JLabel groupingStatus;
     private boolean fileIoInProgress;
+    private boolean parameterMutationsBlocked;
 
     public ParameterStoreTab(SpecOpsContext context) {
         this.context = context;
@@ -123,19 +127,20 @@ public class ParameterStoreTab extends JPanel {
         populateFromProxyButton.addActionListener(e -> populateFromProxy());
         buttonPanel.add(populateFromProxyButton);
 
-        buttonPanel.add(createGenerateValuesButton());
+        generateValuesButton = createGenerateValuesButton();
+        buttonPanel.add(generateValuesButton);
 
-        JButton importButton = new JButton("Import Values");
-        importButton.addActionListener(e -> importValues());
-        buttonPanel.add(importButton);
+        importValuesButton = new JButton("Import Values");
+        importValuesButton.addActionListener(e -> importValues());
+        buttonPanel.add(importValuesButton);
 
         JButton exportButton = new JButton("Export Values");
         exportButton.addActionListener(e -> exportValues());
         buttonPanel.add(exportButton);
 
-        JButton clearButton = new JButton("Clear Values");
-        clearButton.addActionListener(e -> clearValues());
-        buttonPanel.add(clearButton);
+        clearValuesButton = new JButton("Clear Values");
+        clearValuesButton.addActionListener(e -> clearValues());
+        buttonPanel.add(clearValuesButton);
 
         JCheckBox groupByNameToggle = new JCheckBox("Group by name", true);
         groupByNameToggle.addActionListener(e -> applySortKeys(groupByNameToggle.isSelected()));
@@ -245,11 +250,24 @@ public class ParameterStoreTab extends JPanel {
         return menu;
     }
 
-    private JComponent createGenerateValuesButton() {
+    private JButton createGenerateValuesButton() {
         JButton generateButton = new JButton("Generate Values");
         JPopupMenu popupMenu = createGenerateValuesMenu();
         generateButton.addActionListener(e -> popupMenu.show(generateButton, 0, generateButton.getHeight()));
         return generateButton;
+    }
+
+    private void setParameterMutationsBlocked(boolean blocked) {
+        parameterMutationsBlocked = blocked;
+
+        if (blocked) {
+            commitEditsIfAny();
+        }
+
+        parameterTable.setEnabled(!blocked);
+        if (generateValuesButton != null) generateValuesButton.setEnabled(!blocked);
+        if (clearValuesButton != null) clearValuesButton.setEnabled(!blocked);
+        if (pasteCellAction != null) pasteCellAction.setEnabled(!blocked);
     }
 
     private void setupFilterListener() {
@@ -301,6 +319,13 @@ public class ParameterStoreTab extends JPanel {
     }
 
     private void generateValues(String typeFilter) {
+        if (parameterMutationsBlocked) {
+            JOptionPane.showMessageDialog(this,
+                    "Parameter edits are temporarily disabled while import is running.",
+                    "Generate Values", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
         commitEditsIfAny();
         int count = ValueGenerator.generateValues(context.getGlobalParameterStore(), typeFilter);
         refreshData();
@@ -422,6 +447,8 @@ public class ParameterStoreTab extends JPanel {
 
         fileIoInProgress = true;
         setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+        setParameterMutationsBlocked(true);
+        importValuesButton.setEnabled(false);
 
         new SwingWorker<Integer, Void>() {
             @Override
@@ -438,6 +465,8 @@ public class ParameterStoreTab extends JPanel {
             protected void done() {
                 fileIoInProgress = false;
                 setCursor(Cursor.getDefaultCursor());
+                setParameterMutationsBlocked(false);
+                importValuesButton.setEnabled(true);
                 try {
                     int count = get();
                     refreshData();
@@ -904,6 +933,13 @@ public class ParameterStoreTab extends JPanel {
     }
 
     private void clearValues() {
+        if (parameterMutationsBlocked) {
+            JOptionPane.showMessageDialog(this,
+                    "Parameter edits are temporarily disabled while import is running.",
+                    "Clear Values", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
         commitEditsIfAny();
         int cleared = 0;
         for (Parameter p : context.getGlobalParameterStore().values()) {
