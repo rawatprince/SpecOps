@@ -150,12 +150,21 @@ public class ValueGenerator {
         }
     }
 
+    /**
+     * Imports parameter values from JSON content.
+     *
+     * <p>Partial updates are intentionally allowed: if the JSON document is valid, each matching
+     * parameter entry is applied independently, while unknown or malformed entries are skipped.
+     * Parsing or top-level format errors are propagated to the caller.
+     */
     public static int importValues(Map<String, Parameter> parameterStore, ByteArray content) {
         int updated = 0;
         try {
             JsonNode root = Json.mapper().readTree(content.getBytes());
             JsonNode params = root.path("parameters");
-            if (!params.isObject()) return 0;
+            if (!params.isObject()) {
+                throw new IllegalArgumentException("Invalid import format: expected object field 'parameters'.");
+            }
 
             Iterator<String> fieldNames = params.fieldNames();
             while (fieldNames.hasNext()) {
@@ -186,6 +195,7 @@ public class ValueGenerator {
                 updated++;
             }
         } catch (Exception e) {
+            throw new IllegalArgumentException("Failed to import parameter values from JSON.", e);
         }
         return updated;
     }

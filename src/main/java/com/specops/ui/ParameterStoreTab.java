@@ -536,13 +536,26 @@ public class ParameterStoreTab extends JPanel {
                             "Import Error", JOptionPane.ERROR_MESSAGE);
                 } catch (ExecutionException ex) {
                     Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                    Throwable rootCause = rootCause(cause);
+                    String rootMessage = rootCause.getMessage() != null
+                            ? rootCause.getMessage()
+                            : rootCause.getClass().getSimpleName();
                     context.api.logging().logToError("Import failed: " + cause.getMessage());
+                    context.api.logging().logToError("Import root cause: " + rootMessage);
                     JOptionPane.showMessageDialog(ParameterStoreTab.this,
-                            "Import failed: " + cause.getMessage(),
+                            "Import failed: " + rootMessage,
                             "Import Error", JOptionPane.ERROR_MESSAGE);
                 }
             }
         }.execute();
+    }
+
+    private static Throwable rootCause(Throwable t) {
+        Throwable cur = t;
+        while (cur.getCause() != null && cur.getCause() != cur) {
+            cur = cur.getCause();
+        }
+        return cur;
     }
 
     private void commitEditsIfAny() {
