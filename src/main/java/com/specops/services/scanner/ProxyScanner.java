@@ -406,6 +406,7 @@ public class ProxyScanner {
                 return context.api.proxy().history();
             }
 
+            final boolean[] filterInvocationFailed = {false};
             Object filter = java.lang.reflect.Proxy.newProxyInstance(
                     filterClass.getClassLoader(),
                     new Class<?>[]{filterClass},
@@ -432,6 +433,7 @@ public class ProxyScanner {
                                     String host = (String) hostMethod.invoke(service);
                                     return hostMatchesTarget(host, targetDomain);
                                 } catch (ReflectiveOperationException | RuntimeException malformedEntry) {
+                                    filterInvocationFailed[0] = true;
                                     return false;
                                 }
                             default:
@@ -440,6 +442,9 @@ public class ProxyScanner {
                     });
 
             Object filteredHistory = historyWithFilter.invoke(proxyApi, filter);
+            if (filterInvocationFailed[0]) {
+                throw new RuntimeException("ProxyHistoryFilter invocation failed; falling back to full history.");
+            }
             if (filteredHistory instanceof List<?>) {
                 context.api.logging().logToOutput("ProxyScanner using filtered proxy history path.");
                 return (List<ProxyHttpRequestResponse>) filteredHistory;
