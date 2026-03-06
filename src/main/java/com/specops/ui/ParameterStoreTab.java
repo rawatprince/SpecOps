@@ -388,6 +388,13 @@ public class ParameterStoreTab extends JPanel {
             return;
         }
 
+        if (parameterMutationsBlocked) {
+            JOptionPane.showMessageDialog(this,
+                    "Parameter edits are temporarily disabled while another operation is running.",
+                    "Export Values", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
         JFileChooser fileChooser = new JFileChooser();
         fileChooser.setDialogTitle("Export Parameter Values");
         fileChooser.addChoosableFileFilter(new FileNameExtensionFilter("CSV Files", "csv"));
@@ -418,6 +425,7 @@ public class ParameterStoreTab extends JPanel {
 
         fileIoInProgress = true;
         setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+        setParameterMutationsBlocked(true);
 
         new SwingWorker<Void, Void>() {
             @Override
@@ -437,6 +445,7 @@ public class ParameterStoreTab extends JPanel {
             protected void done() {
                 fileIoInProgress = false;
                 setCursor(Cursor.getDefaultCursor());
+                setParameterMutationsBlocked(false);
                 try {
                     get();
                     JOptionPane.showMessageDialog(ParameterStoreTab.this,
