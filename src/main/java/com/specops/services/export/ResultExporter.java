@@ -7,6 +7,7 @@ import java.io.IOException;
 import java.nio.charset.StandardCharsets;
 import java.nio.file.Files;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 
 public final class ResultExporter {
@@ -16,9 +17,10 @@ public final class ResultExporter {
 
     public static void exportCsv(List<AttackResult> results, Path outputPath, boolean includePayloads)
             throws IOException {
+        List<AttackResult> snapshot = new ArrayList<>(results);
         try (BufferedWriter writer = Files.newBufferedWriter(outputPath, StandardCharsets.UTF_8)) {
             writeCsvHeader(writer, includePayloads);
-            for (AttackResult result : results) {
+            for (AttackResult result : snapshot) {
                 writeCsvRow(writer, result, includePayloads);
             }
         }
@@ -26,11 +28,12 @@ public final class ResultExporter {
 
     public static void exportJson(List<AttackResult> results, Path outputPath, boolean includePayloads)
             throws IOException {
+        List<AttackResult> snapshot = new ArrayList<>(results);
         try (BufferedWriter writer = Files.newBufferedWriter(outputPath, StandardCharsets.UTF_8)) {
             writer.write("[");
             writer.newLine();
-            for (int i = 0; i < results.size(); i++) {
-                writeJsonEntry(writer, results.get(i), includePayloads, i == results.size() - 1);
+            for (int i = 0; i < snapshot.size(); i++) {
+                writeJsonEntry(writer, snapshot.get(i), includePayloads, i == snapshot.size() - 1);
             }
             writer.write("]");
             writer.newLine();

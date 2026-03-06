@@ -20,7 +20,6 @@ import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
 import java.nio.file.Path;
-import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutionException;
@@ -126,7 +125,7 @@ public class ResultsTab extends JPanel {
     }
 
     private void clearResults() {
-        context.getAttackResults().clear();
+        context.clearAttackResults();
         refreshData();
     }
 
@@ -134,8 +133,7 @@ public class ResultsTab extends JPanel {
         int selectedViewRow = resultsTable.getSelectedRow();
         if (selectedViewRow == -1) return null;
         int modelRow = resultsTable.convertRowIndexToModel(selectedViewRow);
-        if (modelRow < 0 || modelRow >= context.getAttackResults().size()) return null;
-        return context.getAttackResults().get(modelRow);
+        return context.getAttackResultAt(modelRow);
     }
 
     private void updatePreviewFromSelection() {
@@ -172,11 +170,8 @@ public class ResultsTab extends JPanel {
                 @Override
                 public boolean include(Entry<? extends ResultTableModel, ? extends Integer> entry) {
                     int modelRow = entry.getIdentifier();
-                    if (modelRow < 0 || modelRow >= context.getAttackResults().size()) {
-                        return false;
-                    }
-                    AttackResult result = context.getAttackResults().get(modelRow);
-                    return matchesResult(result, needle);
+                    AttackResult result = context.getAttackResultAt(modelRow);
+                    return result != null && matchesResult(result, needle);
                 }
             });
         }
@@ -265,8 +260,8 @@ public class ResultsTab extends JPanel {
             return;
         }
 
-        List<AttackResult> results = context.getAttackResults();
-        if (results.isEmpty()) {
+        List<AttackResult> resultsSnapshot = context.getAttackResultsSnapshot();
+        if (resultsSnapshot.isEmpty()) {
             JOptionPane.showMessageDialog(this, "No results available to export.", "Export Results",
                     JOptionPane.INFORMATION_MESSAGE);
             return;
@@ -287,7 +282,6 @@ public class ResultsTab extends JPanel {
         File selectedFile = chooser.getSelectedFile();
         Path outputPath = ensureExtension(selectedFile.toPath(), format.extension);
         boolean includePayloadData = includePayloads.isSelected();
-        List<AttackResult> resultsSnapshot = new ArrayList<>(results);
 
         exportInProgress = true;
         setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
