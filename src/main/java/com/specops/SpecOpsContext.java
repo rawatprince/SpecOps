@@ -213,18 +213,34 @@ public class SpecOpsContext {
         this.bindingsUpdateListener = r;
     }
 
+    /**
+     * Invokes the endpoints listener on the calling thread.
+     * Swing listeners must dispatch UI mutations to the EDT.
+     */
     public void notifyEndpointsChanged() {
         if (endpointsUpdateListener != null) endpointsUpdateListener.accept(null);
     }
 
+    /**
+     * Invokes the parameters listener on the calling thread.
+     * Swing listeners must dispatch UI mutations to the EDT.
+     */
     public void notifyParametersChanged() {
         if (parametersUpdateListener != null) parametersUpdateListener.accept(null);
     }
 
+    /**
+     * Invokes the server listener on the calling thread.
+     * Swing listeners must dispatch UI mutations to the EDT.
+     */
     public void notifyServersChanged() {
         if (serversUpdateListener != null) serversUpdateListener.accept(null);
     }
 
+    /**
+     * Invokes the bindings listener on the calling thread.
+     * Swing listeners must dispatch UI mutations to the EDT.
+     */
     public void notifyBindingsChanged() {
         if (bindingsUpdateListener != null) bindingsUpdateListener.run();
     }
