@@ -7,6 +7,8 @@ import com.specops.domain.Parameter;
 import com.specops.domain.rules.HeaderRule;
 import io.swagger.v3.oas.models.OpenAPI;
 
+import java.util.ArrayList;
+import java.util.Collections;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -45,7 +47,7 @@ public class SpecOpsContext {
         this.api = api;
         this.endpoints = new CopyOnWriteArrayList<>();
         this.globalParameterStore = new ConcurrentHashMap<>();
-        this.attackResults = new CopyOnWriteArrayList<>();
+        this.attackResults = Collections.synchronizedList(new ArrayList<>());
         this.headerRules = new CopyOnWriteArrayList<>();
         this.serverVariableOverrides = new ConcurrentHashMap<>();
         this.authTokens = new ConcurrentHashMap<>();
@@ -56,6 +58,33 @@ public class SpecOpsContext {
     public List<Endpoint> getEndpoints() { return endpoints; }
     public Map<String, Parameter> getGlobalParameterStore() { return globalParameterStore; }
     public List<AttackResult> getAttackResults() { return attackResults; }
+
+    public int getAttackResultCount() {
+        synchronized (attackResults) {
+            return attackResults.size();
+        }
+    }
+
+    public AttackResult getAttackResultAt(int index) {
+        synchronized (attackResults) {
+            if (index < 0 || index >= attackResults.size()) {
+                return null;
+            }
+            return attackResults.get(index);
+        }
+    }
+
+    public List<AttackResult> getAttackResultsSnapshot() {
+        synchronized (attackResults) {
+            return new ArrayList<>(attackResults);
+        }
+    }
+
+    public void clearAttackResults() {
+        synchronized (attackResults) {
+            attackResults.clear();
+        }
+    }
 
     /**
      * Replace the whole model (used after parsing a spec).
@@ -80,7 +109,7 @@ public class SpecOpsContext {
             }
         }
 
-        this.attackResults.clear();
+        clearAttackResults();
 
         this.selectedServerIndex = 0;
         this.serverVariableOverrides.clear();
@@ -186,7 +215,9 @@ public class SpecOpsContext {
     private static String nz(String s) { return s == null ? "" : s; }
 
     public void addAttackResult(AttackResult result) {
-        this.attackResults.add(result);
+        synchronized (attackResults) {
+            this.attackResults.add(result);
+        }
         if (attackResultListener != null) {
             attackResultListener.accept(result);
         }

@@ -19,7 +19,7 @@ public class ResultTableModel extends AbstractTableModel {
 
     @Override
     public int getRowCount() {
-        return context.getAttackResults().size();
+        return context.getAttackResultCount();
     }
 
     @Override
@@ -43,7 +43,10 @@ public class ResultTableModel extends AbstractTableModel {
 
     @Override
     public Object getValueAt(int rowIndex, int columnIndex) {
-        AttackResult result = context.getAttackResults().get(rowIndex);
+        AttackResult result = context.getAttackResultAt(rowIndex);
+        if (result == null) {
+            return null;
+        }
         switch (columnIndex) {
             case 0:
                 return result.getTimestamp();
