@@ -37,8 +37,57 @@ public class ProxyScanner {
         return out;
     }
 
+    private static String normalizeHost(String value) {
+        if (value == null) {
+            return "";
+        }
+
+        String normalized = value.trim().toLowerCase(Locale.ROOT);
+        if (normalized.isEmpty()) {
+            return "";
+        }
+
+        // Accept user input such as https://api.example.com:443/path and reduce it to host.
+        int schemeIdx = normalized.indexOf("://");
+        if (schemeIdx >= 0 && schemeIdx + 3 < normalized.length()) {
+            normalized = normalized.substring(schemeIdx + 3);
+        }
+
+        int slashIdx = normalized.indexOf('/');
+        if (slashIdx >= 0) {
+            normalized = normalized.substring(0, slashIdx);
+        }
+
+        int colonIdx = normalized.indexOf(':');
+        if (colonIdx >= 0) {
+            normalized = normalized.substring(0, colonIdx);
+        }
+
+        while (normalized.endsWith(".")) {
+            normalized = normalized.substring(0, normalized.length() - 1);
+        }
+
+        return normalized;
+    }
+
     private static boolean hostMatchesTarget(String host, String targetDomain) {
-        return host != null && targetDomain != null && host.equalsIgnoreCase(targetDomain);
+        String normalizedHost = normalizeHost(host);
+        String normalizedTarget = normalizeHost(targetDomain);
+        if (normalizedHost.isEmpty() || normalizedTarget.isEmpty()) {
+            return false;
+        }
+
+        // Support wildcard user input: *.example.com
+        if (normalizedTarget.startsWith("*.")) {
+            String suffix = normalizedTarget.substring(2);
+            return !suffix.isEmpty()
+                    && normalizedHost.endsWith("." + suffix)
+                    && !normalizedHost.equals(suffix);
+        }
+
+        // Match exact domain and any subdomain of the target.
+        return normalizedHost.equals(normalizedTarget)
+                || normalizedHost.endsWith("." + normalizedTarget);
     }
 
     /**
