@@ -260,13 +260,6 @@ public class ResultsTab extends JPanel {
             return;
         }
 
-        List<AttackResult> resultsSnapshot = context.getAttackResultsSnapshot();
-        if (resultsSnapshot.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "No results available to export.", "Export Results",
-                    JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
-
         JFileChooser chooser = new JFileChooser();
         chooser.setDialogTitle("Export Results as " + format.label);
         chooser.setFileFilter(new FileNameExtensionFilter(format.filterLabel, format.extension));
@@ -282,6 +275,12 @@ public class ResultsTab extends JPanel {
         File selectedFile = chooser.getSelectedFile();
         Path outputPath = ensureExtension(selectedFile.toPath(), format.extension);
         boolean includePayloadData = includePayloads.isSelected();
+        List<AttackResult> resultsSnapshot = context.getAttackResultsSnapshot();
+        if (resultsSnapshot.isEmpty()) {
+            JOptionPane.showMessageDialog(this, "No results available to export.", "Export Results",
+                    JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
 
         exportInProgress = true;
         setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
