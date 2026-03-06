@@ -57,8 +57,10 @@ public class ParameterStoreTab extends JPanel {
 
     private Action copyCellAction;
     private Action pasteCellAction;
+    private JButton populateFromProxyButton;
     private JButton generateValuesButton;
     private JButton importValuesButton;
+    private JButton exportValuesButton;
     private JButton clearValuesButton;
 
     private static final Preferences PREFS = Preferences.userNodeForPackage(ParameterStoreTab.class);
@@ -123,7 +125,7 @@ public class ParameterStoreTab extends JPanel {
         JPanel buttonPanel = new JPanel(new FlowLayout(FlowLayout.LEFT));
         JPanel rightPanel = new JPanel(new FlowLayout(FlowLayout.RIGHT));
 
-        JButton populateFromProxyButton = new JButton("Populate from Proxy");
+        populateFromProxyButton = new JButton("Populate from Proxy");
         populateFromProxyButton.addActionListener(e -> populateFromProxy());
         buttonPanel.add(populateFromProxyButton);
 
@@ -134,9 +136,9 @@ public class ParameterStoreTab extends JPanel {
         importValuesButton.addActionListener(e -> importValues());
         buttonPanel.add(importValuesButton);
 
-        JButton exportButton = new JButton("Export Values");
-        exportButton.addActionListener(e -> exportValues());
-        buttonPanel.add(exportButton);
+        exportValuesButton = new JButton("Export Values");
+        exportValuesButton.addActionListener(e -> exportValues());
+        buttonPanel.add(exportValuesButton);
 
         clearValuesButton = new JButton("Clear Values");
         clearValuesButton.addActionListener(e -> clearValues());
@@ -265,7 +267,9 @@ public class ParameterStoreTab extends JPanel {
         }
 
         parameterTable.setEnabled(!blocked);
+        if (populateFromProxyButton != null) populateFromProxyButton.setEnabled(!blocked);
         if (generateValuesButton != null) generateValuesButton.setEnabled(!blocked);
+        if (exportValuesButton != null) exportValuesButton.setEnabled(!blocked);
         if (clearValuesButton != null) clearValuesButton.setEnabled(!blocked);
         if (pasteCellAction != null) pasteCellAction.setEnabled(!blocked);
     }
@@ -286,6 +290,13 @@ public class ParameterStoreTab extends JPanel {
     }
 
     private void populateFromProxy() {
+        if (parameterMutationsBlocked) {
+            JOptionPane.showMessageDialog(this,
+                    "Parameter edits are temporarily disabled while import is running.",
+                    "Populate from Proxy", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
         String domain = JOptionPane.showInputDialog(this,
                 "Enter the target domain to scan from Proxy history, e.g. api.example.com",
                 "Populate from Proxy",
@@ -372,6 +383,7 @@ public class ParameterStoreTab extends JPanel {
         final File outputFile = file;
         final String outputLower = lower;
         final Path outputPath = outputFile.toPath();
+        final Map<String, Parameter> exportSnapshot = snapshotParameterStoreForExport();
 
         fileIoInProgress = true;
         setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
@@ -380,9 +392,9 @@ public class ParameterStoreTab extends JPanel {
             @Override
             protected Void doInBackground() throws Exception {
                 if (outputLower.endsWith(".csv")) {
-                    writeCsv(outputPath);
+                    writeCsv(outputPath, exportSnapshot.values());
                 } else {
-                    ByteArray content = ValueGenerator.exportValues(context.getGlobalParameterStore());
+                    ByteArray content = ValueGenerator.exportValues(exportSnapshot);
                     Files.write(outputPath, content.getBytes(),
                             StandardOpenOption.CREATE, StandardOpenOption.TRUNCATE_EXISTING, StandardOpenOption.WRITE);
                 }
@@ -628,14 +640,12 @@ public class ParameterStoreTab extends JPanel {
 
     // ===== CSV I/O =====
 
-    private void writeCsv(Path path) throws IOException {
-        Map<String, Parameter> store = context.getGlobalParameterStore();
-
+    private void writeCsv(Path path, Collection<Parameter> rows) throws IOException {
         try (BufferedWriter w = Files.newBufferedWriter(path, StandardCharsets.UTF_8)) {
             w.write("name,path,in,value,type,source,locked");
             w.write("\r\n");
 
-            store.values().stream()
+            rows.stream()
                     .sorted(Comparator
                             .comparing((Parameter p) -> nz(p.getName()), Comparator.nullsFirst(String::compareToIgnoreCase))
                             .thenComparing(p -> nz(p.getIn()), Comparator.nullsFirst(String::compareToIgnoreCase)))
@@ -667,6 +677,25 @@ public class ParameterStoreTab extends JPanel {
                         }
                     });
         }
+    }
+
+    private Map<String, Parameter> snapshotParameterStoreForExport() {
+        Map<String, Parameter> snapshot = new LinkedHashMap<>();
+        for (Map.Entry<String, Parameter> e : context.getGlobalParameterStore().entrySet()) {
+            Parameter p = e.getValue();
+            if (p == null) continue;
+            snapshot.put(e.getKey(), cloneParameterForExport(p));
+        }
+        return snapshot;
+    }
+
+    private static Parameter cloneParameterForExport(Parameter source) {
+        Parameter copy = new Parameter(source.getName(), source.getIn(), source.getType());
+        copy.setValue(source.getValue());
+        copy.setLocked(source.isLocked());
+        copy.setSource(source.getSource());
+        copy.setJsonPath(source.getJsonPath());
+        return copy;
     }
 
     private int importCsv(Path path) throws IOException {
