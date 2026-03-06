@@ -402,6 +402,7 @@ public class ProxyScanner {
                     .orElse(null);
 
             if (historyWithFilter == null || !filterClass.isInterface()) {
+                context.api.logging().logToOutput("ProxyScanner using full proxy history path (ProxyHistoryFilter unavailable).");
                 return context.api.proxy().history();
             }
 
@@ -409,27 +410,45 @@ public class ProxyScanner {
                     filterClass.getClassLoader(),
                     new Class<?>[]{filterClass},
                     (ignoredProxy, method, args) -> {
-                        if (method.getReturnType().equals(boolean.class) && args != null && args.length == 1) {
-                            Object entry = args[0];
-                            Method finalRequestMethod = entry.getClass().getMethod("finalRequest");
-                            Object request = finalRequestMethod.invoke(entry);
-                            Method httpServiceMethod = request.getClass().getMethod("httpService");
-                            Object service = httpServiceMethod.invoke(request);
-                            Method hostMethod = service.getClass().getMethod("host");
-                            String host = (String) hostMethod.invoke(service);
-                            return hostMatchesTarget(host, targetDomain);
+                        switch (method.getName()) {
+                            case "equals":
+                                return ignoredProxy == (args != null && args.length == 1 ? args[0] : null);
+                            case "hashCode":
+                                return System.identityHashCode(ignoredProxy);
+                            case "toString":
+                                return "ProxyHistoryFilterProxy(" + targetDomain + ")";
+                            case "matches":
+                                if (!method.getReturnType().equals(boolean.class) || args == null || args.length != 1 || args[0] == null) {
+                                    return false;
+                                }
+
+                                try {
+                                    Object entry = args[0];
+                                    Method finalRequestMethod = entry.getClass().getMethod("finalRequest");
+                                    Object request = finalRequestMethod.invoke(entry);
+                                    Method httpServiceMethod = request.getClass().getMethod("httpService");
+                                    Object service = httpServiceMethod.invoke(request);
+                                    Method hostMethod = service.getClass().getMethod("host");
+                                    String host = (String) hostMethod.invoke(service);
+                                    return hostMatchesTarget(host, targetDomain);
+                                } catch (ReflectiveOperationException | RuntimeException malformedEntry) {
+                                    return false;
+                                }
+                            default:
+                                return false;
                         }
-                        return null;
                     });
 
             Object filteredHistory = historyWithFilter.invoke(proxyApi, filter);
             if (filteredHistory instanceof List<?>) {
+                context.api.logging().logToOutput("ProxyScanner using filtered proxy history path.");
                 return (List<ProxyHttpRequestResponse>) filteredHistory;
             }
-        } catch (ClassNotFoundException | IllegalAccessException | InvocationTargetException e) {
+        } catch (ClassNotFoundException | IllegalAccessException | InvocationTargetException | RuntimeException e) {
             context.api.logging().logToError("ProxyHistoryFilter unavailable, falling back to full history scan: " + e.getMessage());
         }
 
+        context.api.logging().logToOutput("ProxyScanner using full proxy history path.");
         return context.api.proxy().history();
     }
 }
