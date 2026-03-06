@@ -5,6 +5,8 @@ import burp.api.montoya.proxy.ProxyHttpRequestResponse;
 import com.specops.SpecOpsContext;
 import com.specops.domain.Parameter;
 
+import java.lang.reflect.InvocationTargetException;
+import java.lang.reflect.Method;
 import java.util.*;
 import java.util.stream.Collectors;
 
@@ -35,6 +37,10 @@ public class ProxyScanner {
         return out;
     }
 
+    private static boolean hostMatchesTarget(String host, String targetDomain) {
+        return host != null && targetDomain != null && host.equalsIgnoreCase(targetDomain);
+    }
+
     /**
      * Scans the proxy history for requests to the specified domain and updates
      * the Global Parameter Store with any discovered values.
@@ -43,16 +49,21 @@ public class ProxyScanner {
         int updatedCount = 0;
         Map<String, Parameter> paramStore = context.getGlobalParameterStore();
 
-        // Full proxy history
-        List<ProxyHttpRequestResponse> history = context.api.proxy().history();
+        String normalizedTargetDomain = targetDomain == null ? "" : targetDomain.trim();
+        if (normalizedTargetDomain.isEmpty()) {
+            return 0;
+        }
+
+        // Request only matching entries from proxy history when ProxyHistoryFilter is available.
+        List<ProxyHttpRequestResponse> history = filteredHistory(normalizedTargetDomain);
 
         // Iterate newest first
         for (int i = history.size() - 1; i >= 0; i--) {
             ProxyHttpRequestResponse phr = history.get(i);
 
-            // Use finalRequest().httpService() to get host reliably
+            // Defensive host check: protects correctness when filtered API is unavailable.
             String host = phr.finalRequest().httpService().host();
-            if (!host.equalsIgnoreCase(targetDomain)) {
+            if (!hostMatchesTarget(host, normalizedTargetDomain)) {
                 continue;
             }
 
@@ -116,5 +127,50 @@ public class ProxyScanner {
             }
         }
         return updatedCount;
+    }
+
+    @SuppressWarnings("unchecked")
+    private List<ProxyHttpRequestResponse> filteredHistory(String targetDomain) {
+        Object proxyApi = context.api.proxy();
+
+        try {
+            Class<?> filterClass = Class.forName("burp.api.montoya.proxy.ProxyHistoryFilter");
+            Method historyWithFilter = Arrays.stream(proxyApi.getClass().getMethods())
+                    .filter(m -> m.getName().equals("history"))
+                    .filter(m -> m.getParameterCount() == 1)
+                    .filter(m -> m.getParameterTypes()[0].equals(filterClass))
+                    .findFirst()
+                    .orElse(null);
+
+            if (historyWithFilter == null || !filterClass.isInterface()) {
+                return context.api.proxy().history();
+            }
+
+            Object filter = java.lang.reflect.Proxy.newProxyInstance(
+                    filterClass.getClassLoader(),
+                    new Class<?>[]{filterClass},
+                    (ignoredProxy, method, args) -> {
+                        if (method.getReturnType().equals(boolean.class) && args != null && args.length == 1) {
+                            Object entry = args[0];
+                            Method finalRequestMethod = entry.getClass().getMethod("finalRequest");
+                            Object request = finalRequestMethod.invoke(entry);
+                            Method httpServiceMethod = request.getClass().getMethod("httpService");
+                            Object service = httpServiceMethod.invoke(request);
+                            Method hostMethod = service.getClass().getMethod("host");
+                            String host = (String) hostMethod.invoke(service);
+                            return hostMatchesTarget(host, targetDomain);
+                        }
+                        return null;
+                    });
+
+            Object filteredHistory = historyWithFilter.invoke(proxyApi, filter);
+            if (filteredHistory instanceof List<?>) {
+                return (List<ProxyHttpRequestResponse>) filteredHistory;
+            }
+        } catch (ClassNotFoundException | IllegalAccessException | InvocationTargetException e) {
+            context.api.logging().logToError("ProxyHistoryFilter unavailable, falling back to full history scan: " + e.getMessage());
+        }
+
+        return context.api.proxy().history();
     }
 }
