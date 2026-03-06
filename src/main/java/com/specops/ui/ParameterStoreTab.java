@@ -413,9 +413,8 @@ public class ParameterStoreTab extends JPanel {
         }
 
         final File outputFile = file;
-        final String outputLower = lower;
         final Path outputPath = outputFile.toPath();
-        final Map<String, Parameter> exportSnapshot = snapshotParameterStoreForExport();
+        final boolean exportCsv = lower.endsWith(".csv");
 
         fileIoInProgress = true;
         setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
@@ -423,7 +422,8 @@ public class ParameterStoreTab extends JPanel {
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() throws Exception {
-                if (outputLower.endsWith(".csv")) {
+                Map<String, Parameter> exportSnapshot = snapshotParameterStoreForExport();
+                if (exportCsv) {
                     writeCsv(outputPath, exportSnapshot.values());
                 } else {
                     ByteArray content = ValueGenerator.exportValues(exportSnapshot);
