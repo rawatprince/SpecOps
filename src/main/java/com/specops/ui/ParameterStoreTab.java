@@ -269,6 +269,7 @@ public class ParameterStoreTab extends JPanel {
         parameterTable.setEnabled(!blocked);
         if (populateFromProxyButton != null) populateFromProxyButton.setEnabled(!blocked);
         if (generateValuesButton != null) generateValuesButton.setEnabled(!blocked);
+        if (importValuesButton != null) importValuesButton.setEnabled(!blocked);
         if (exportValuesButton != null) exportValuesButton.setEnabled(!blocked);
         if (clearValuesButton != null) clearValuesButton.setEnabled(!blocked);
         if (pasteCellAction != null) pasteCellAction.setEnabled(!blocked);
@@ -303,6 +304,7 @@ public class ParameterStoreTab extends JPanel {
                 JOptionPane.PLAIN_MESSAGE);
 
         if (domain != null && !domain.trim().isEmpty()) {
+            setParameterMutationsBlocked(true);
             new SwingWorker<Integer, Void>() {
                 @Override
                 protected Integer doInBackground() {
@@ -312,6 +314,7 @@ public class ParameterStoreTab extends JPanel {
 
                 @Override
                 protected void done() {
+                    setParameterMutationsBlocked(false);
                     try {
                         int updatedCount = get();
                         refreshData();
