@@ -388,6 +388,13 @@ public class ParameterStoreTab extends JPanel {
             return;
         }
 
+        if (parameterMutationsBlocked) {
+            JOptionPane.showMessageDialog(this,
+                    "Parameter edits are temporarily disabled while another operation is running.",
+                    "Export Values", JOptionPane.INFORMATION_MESSAGE);
+            return;
+        }
+
         JFileChooser fileChooser = new JFileChooser();
         fileChooser.setDialogTitle("Export Parameter Values");
         fileChooser.addChoosableFileFilter(new FileNameExtensionFilter("CSV Files", "csv"));
@@ -413,17 +420,18 @@ public class ParameterStoreTab extends JPanel {
         }
 
         final File outputFile = file;
-        final String outputLower = lower;
         final Path outputPath = outputFile.toPath();
-        final Map<String, Parameter> exportSnapshot = snapshotParameterStoreForExport();
+        final boolean exportCsv = lower.endsWith(".csv");
 
         fileIoInProgress = true;
         setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+        setParameterMutationsBlocked(true);
 
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() throws Exception {
-                if (outputLower.endsWith(".csv")) {
+                Map<String, Parameter> exportSnapshot = snapshotParameterStoreForExport();
+                if (exportCsv) {
                     writeCsv(outputPath, exportSnapshot.values());
                 } else {
                     ByteArray content = ValueGenerator.exportValues(exportSnapshot);
@@ -437,6 +445,7 @@ public class ParameterStoreTab extends JPanel {
             protected void done() {
                 fileIoInProgress = false;
                 setCursor(Cursor.getDefaultCursor());
+                setParameterMutationsBlocked(false);
                 try {
                     get();
                     JOptionPane.showMessageDialog(ParameterStoreTab.this,

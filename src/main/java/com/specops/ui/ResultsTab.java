@@ -275,12 +275,6 @@ public class ResultsTab extends JPanel {
         File selectedFile = chooser.getSelectedFile();
         Path outputPath = ensureExtension(selectedFile.toPath(), format.extension);
         boolean includePayloadData = includePayloads.isSelected();
-        List<AttackResult> resultsSnapshot = context.getAttackResultsSnapshot();
-        if (resultsSnapshot.isEmpty()) {
-            JOptionPane.showMessageDialog(this, "No results available to export.", "Export Results",
-                    JOptionPane.INFORMATION_MESSAGE);
-            return;
-        }
 
         exportInProgress = true;
         setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
@@ -288,6 +282,11 @@ public class ResultsTab extends JPanel {
         new SwingWorker<Void, Void>() {
             @Override
             protected Void doInBackground() throws Exception {
+                List<AttackResult> resultsSnapshot = context.getAttackResultsSnapshot();
+                if (resultsSnapshot.isEmpty()) {
+                    throw new IllegalStateException("No results available to export.");
+                }
+
                 if (format == ExportFormat.CSV) {
                     ResultExporter.exportCsv(resultsSnapshot, outputPath, includePayloadData);
                 } else {
