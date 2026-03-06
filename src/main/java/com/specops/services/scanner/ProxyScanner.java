@@ -58,9 +58,24 @@ public class ProxyScanner {
             normalized = normalized.substring(0, slashIdx);
         }
 
-        int colonIdx = normalized.indexOf(':');
-        if (colonIdx >= 0) {
-            normalized = normalized.substring(0, colonIdx);
+        // IPv6 literals include ':' in the address, so only strip ports when safe.
+        if (normalized.startsWith("[")) {
+            // Bracketed IPv6 with optional :port, e.g. [2001:db8::1]:443
+            int closingBracketIdx = normalized.indexOf(']');
+            if (closingBracketIdx > 1) {
+                normalized = normalized.substring(1, closingBracketIdx);
+            }
+        } else {
+            int firstColonIdx = normalized.indexOf(':');
+            int lastColonIdx = normalized.lastIndexOf(':');
+
+            // Strip :port only for hostnames/IPv4 (single ':').
+            if (firstColonIdx >= 0 && firstColonIdx == lastColonIdx) {
+                String maybePort = normalized.substring(lastColonIdx + 1);
+                if (!maybePort.isEmpty() && maybePort.chars().allMatch(Character::isDigit)) {
+                    normalized = normalized.substring(0, lastColonIdx);
+                }
+            }
         }
 
         while (normalized.endsWith(".")) {
