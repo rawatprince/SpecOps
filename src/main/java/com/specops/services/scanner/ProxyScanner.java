@@ -4,10 +4,15 @@ import burp.api.montoya.http.message.params.HttpParameterType;
 import burp.api.montoya.proxy.ProxyHttpRequestResponse;
 import com.specops.SpecOpsContext;
 import com.specops.domain.Parameter;
+import io.swagger.v3.core.util.Json;
 
 import java.lang.reflect.InvocationTargetException;
 import java.lang.reflect.Method;
+import java.net.URLDecoder;
+import java.nio.charset.StandardCharsets;
 import java.util.*;
+import java.util.regex.Matcher;
+import java.util.regex.Pattern;
 import java.util.stream.Collectors;
 
 /**
@@ -35,6 +40,176 @@ public class ProxyScanner {
             }
         }
         return out;
+    }
+
+    private static boolean canPopulateFromProxy(Parameter p) {
+        if (p.isLocked()) {
+            return false;
+        }
+
+        if (p.getValue().isEmpty()) {
+            return true;
+        }
+
+        Parameter.ValueSource source = p.getSource();
+        return source == Parameter.ValueSource.UNKNOWN
+                || source == Parameter.ValueSource.DEFAULT
+                || source == Parameter.ValueSource.PARSER
+                || source == Parameter.ValueSource.GENERATED;
+    }
+
+    private static Map<String, String> extractBodyValues(String contentType, String bodyText) {
+        Map<String, String> out = new HashMap<>();
+        if (bodyText == null || bodyText.isBlank()) {
+            return out;
+        }
+
+        String ct = contentType == null ? "" : contentType.toLowerCase(Locale.ROOT);
+
+        if (ct.contains("application/json") || ct.contains("+json")) {
+            parseJsonBodyValues(bodyText, out);
+            return out;
+        }
+
+        if (ct.contains("application/x-www-form-urlencoded")) {
+            parseFormUrlEncodedValues(bodyText, out);
+            return out;
+        }
+
+        if (ct.contains("multipart/form-data")) {
+            parseMultipartValues(bodyText, out);
+            return out;
+        }
+
+        // Fallbacks for missing/incorrect content-type.
+        parseFormUrlEncodedValues(bodyText, out);
+        if (!out.isEmpty()) {
+            return out;
+        }
+        parseJsonBodyValues(bodyText, out);
+        return out;
+    }
+
+    private static void parseJsonBodyValues(String bodyText, Map<String, String> out) {
+        try {
+            Object root = Json.mapper().readValue(bodyText, Object.class);
+            collectJsonScalars(root, "", out);
+        } catch (Exception ignored) {
+            // Ignore malformed JSON payloads.
+        }
+    }
+
+    private static void parseFormUrlEncodedValues(String bodyText, Map<String, String> out) {
+        if (bodyText == null || bodyText.isBlank()) {
+            return;
+        }
+
+        String[] pairs = bodyText.split("&");
+        for (String pair : pairs) {
+            if (pair == null || pair.isBlank()) {
+                continue;
+            }
+            String[] kv = pair.split("=", 2);
+            String rawKey = kv[0];
+            if (rawKey == null || rawKey.isBlank()) {
+                continue;
+            }
+
+            String key = URLDecoder.decode(rawKey, StandardCharsets.UTF_8).trim();
+            if (key.isEmpty()) {
+                continue;
+            }
+
+            String value = kv.length == 2
+                    ? URLDecoder.decode(kv[1], StandardCharsets.UTF_8)
+                    : "";
+
+            out.putIfAbsent(key.toLowerCase(Locale.ROOT), value);
+
+            // normalize common bracket notation tags[0][name] -> tags[].name
+            String normalized = key
+                    .replaceAll("\\[\\d+\\]", "[]")
+                    .replaceAll("\\[(\\w+)\\]", ".$1");
+            out.putIfAbsent(normalized.toLowerCase(Locale.ROOT), value);
+
+            int dot = normalized.lastIndexOf('.');
+            String leaf = dot >= 0 ? normalized.substring(dot + 1) : normalized;
+            if (leaf.endsWith("[]")) {
+                leaf = leaf.substring(0, leaf.length() - 2);
+            }
+            if (!leaf.isEmpty()) {
+                out.putIfAbsent(leaf.toLowerCase(Locale.ROOT), value);
+            }
+        }
+    }
+
+    private static void parseMultipartValues(String bodyText, Map<String, String> out) {
+        if (bodyText == null || bodyText.isBlank()) {
+            return;
+        }
+
+        String[] parts = bodyText.split("\r?\n\r?\n");
+        Pattern namePattern = Pattern.compile("name=\"([^\"]+)\"");
+
+        for (int i = 0; i + 1 < parts.length; i += 2) {
+            String headers = parts[i];
+            String valueBlock = parts[i + 1];
+
+            Matcher m = namePattern.matcher(headers);
+            if (!m.find()) {
+                continue;
+            }
+
+            String key = m.group(1).trim();
+            if (key.isEmpty()) {
+                continue;
+            }
+
+            String value = valueBlock;
+            int boundaryIdx = value.indexOf("\r\n--");
+            if (boundaryIdx >= 0) {
+                value = value.substring(0, boundaryIdx);
+            }
+            value = value.trim();
+            out.putIfAbsent(key.toLowerCase(Locale.ROOT), value);
+        }
+    }
+
+    @SuppressWarnings("unchecked")
+    private static void collectJsonScalars(Object node, String path, Map<String, String> out) {
+        if (node instanceof Map<?, ?> mapNode) {
+            for (Map.Entry<?, ?> e : mapNode.entrySet()) {
+                String key = String.valueOf(e.getKey());
+                String childPath = path.isEmpty() ? key : path + "." + key;
+                collectJsonScalars(e.getValue(), childPath, out);
+            }
+            return;
+        }
+
+        if (node instanceof List<?> listNode) {
+            for (Object item : listNode) {
+                String childPath = path + "[]";
+                collectJsonScalars(item, childPath, out);
+            }
+            return;
+        }
+
+        if (path.isEmpty() || node == null) {
+            return;
+        }
+
+        String value = String.valueOf(node);
+        String normalizedPath = path.toLowerCase(Locale.ROOT);
+        out.putIfAbsent(normalizedPath, value);
+
+        int dotIdx = normalizedPath.lastIndexOf('.');
+        String leaf = dotIdx >= 0 ? normalizedPath.substring(dotIdx + 1) : normalizedPath;
+        if (leaf.endsWith("[]")) {
+            leaf = leaf.substring(0, leaf.length() - 2);
+        }
+        if (!leaf.isEmpty()) {
+            out.putIfAbsent(leaf, value);
+        }
     }
 
     private static String normalizeHost(String value) {
@@ -144,8 +319,13 @@ public class ProxyScanner {
                             p -> p.value(),
                             (a, b) -> a)); // keep first
 
+            // Pre-index body values from supported content types (json/form/multipart)
+            Map<String, String> bodyValues = extractBodyValues(
+                    req.headerValue("Content-Type"),
+                    req.body().toString());
+
             for (Parameter p : paramStore.values()) {
-                if (p.isLocked() || !p.getValue().isEmpty()) {
+                if (!canPopulateFromProxy(p)) {
                     continue;
                 }
 
@@ -175,6 +355,21 @@ public class ProxyScanner {
                         }
                         if (qv != null && !qv.isEmpty()) {
                             found = Optional.of(qv);
+                        }
+                        break;
+
+                    case "body":
+                        String bodyKey = p.getJsonPath();
+                        if (bodyKey == null || bodyKey.isEmpty()) {
+                            bodyKey = pname;
+                        }
+
+                        String bv = bodyValues.get(bodyKey.toLowerCase(Locale.ROOT));
+                        if ((bv == null || bv.isEmpty()) && pname != null && !pname.isEmpty()) {
+                            bv = bodyValues.get(pname.toLowerCase(Locale.ROOT));
+                        }
+                        if (bv != null && !bv.isEmpty()) {
+                            found = Optional.of(bv);
                         }
                         break;
 
