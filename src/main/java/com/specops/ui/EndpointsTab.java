@@ -136,22 +136,18 @@ public class EndpointsTab extends JPanel {
         add(mainSplitPane, BorderLayout.CENTER);
 
         // Refresh table when endpoints or parameters change
-        context.setEndpointsUpdateListener(v -> refreshData());
-        context.setParametersUpdateListener(v -> {
-            SwingUtilities.invokeLater(() -> {
-                tableModel.recalculateBindingStatus();
-                tableModel.fireTableDataChanged();
-                updatePreviewPanels();
-                updateCountLabel();
-            });
-        });
-        context.setBindingsUpdateListener(() -> {
-            SwingUtilities.invokeLater(() -> {
-                tableModel.recalculateBindingStatus();
-                tableModel.fireTableDataChanged();
-                updateCountLabel();
-            });
-        });
+        context.setEndpointsUpdateListener(v -> runOnEdt(this::refreshData));
+        context.setParametersUpdateListener(v -> runOnEdt(() -> {
+            tableModel.recalculateBindingStatus();
+            tableModel.fireTableDataChanged();
+            updatePreviewPanels();
+            updateCountLabel();
+        }));
+        context.setBindingsUpdateListener(() -> runOnEdt(() -> {
+            tableModel.recalculateBindingStatus();
+            tableModel.fireTableDataChanged();
+            updateCountLabel();
+        }));
 
         // Wire actions
         btnPing.addActionListener(e -> pingSelectedEndpointsWorker());
@@ -168,6 +164,14 @@ public class EndpointsTab extends JPanel {
         tableModel.fireTableDataChanged();
         updatePreviewPanels();
         updateCountLabel();
+    }
+
+    private void runOnEdt(Runnable task) {
+        if (SwingUtilities.isEventDispatchThread()) {
+            task.run();
+        } else {
+            SwingUtilities.invokeLater(task);
+        }
     }
 
     private void updatePreviewPanels() {
@@ -382,7 +386,7 @@ public class EndpointsTab extends JPanel {
                     }
                 }
                 if (stopAfterCurrent.get() && completedCount.get() < totalCount) {
-                    SwingUtilities.invokeLater(() -> statusLabel.setText("Status: Stopping"));
+                    runOnEdt(() -> statusLabel.setText("Status: Stopping"));
                 }
                 return null;
             }
@@ -433,7 +437,7 @@ public class EndpointsTab extends JPanel {
     }
 
     private void updateCountAndEtaOnEDT(int done, int total, long startNano) {
-        SwingUtilities.invokeLater(() -> {
+        runOnEdt(() -> {
             countLabel.setText(done + " / " + total);
             long elapsedNanos = System.nanoTime() - startNano;
             long elapsedMs = TimeUnit.NANOSECONDS.toMillis(elapsedNanos);
