@@ -1,6 +1,7 @@
 package com.specops.services.request;
 
 import burp.api.montoya.core.ByteArray;
+import com.specops.SpecOpsContext;
 import com.specops.domain.Parameter;
 import com.fasterxml.jackson.databind.JsonNode;
 import com.fasterxml.jackson.databind.node.ObjectNode;
@@ -116,6 +117,13 @@ public class ValueGenerator {
     }
 
     public static ByteArray exportValues(Map<String, Parameter> parameterStore) {
+        // JSON schema:
+        // {
+        //   "parameters": {
+        //     "<canonical-key>": {"value":"...", "isLocked":false, "name":"...", "in":"..."}
+        //   }
+        // }
+        // canonical-key format: "in:name" (non-body) or "body:json.path[]" (body; indices wildcarded).
         ObjectNode root = Json.mapper().createObjectNode();
         ObjectNode paramsNode = Json.mapper().createObjectNode();
         root.set("parameters", paramsNode);
@@ -125,7 +133,7 @@ public class ValueGenerator {
             boolean include = !val.isEmpty() || param.isLocked();
             if (!include) continue;
 
-            String key = safeUniqueKey(param);
+            String key = SpecOpsContext.canonicalKey(param);
             ObjectNode item = Json.mapper().createObjectNode();
             item.put("value", val);
             item.put("isLocked", param.isLocked());
@@ -156,6 +164,12 @@ public class ValueGenerator {
                 if (!item.isObject()) continue;
 
                 Parameter param = parameterStore.get(key);
+                if (param == null) {
+                    String translated = translateLegacyKeyToCanonical(key);
+                    if (!translated.equals(key)) {
+                        param = parameterStore.get(translated);
+                    }
+                }
                 if (param == null) {
                     continue;
                 }
@@ -191,12 +205,19 @@ public class ValueGenerator {
         }
     }
 
-    private static String safeUniqueKey(Parameter p) {
-        try {
-            return String.valueOf(p.getUniqueKey());
-        } catch (Exception e) {
-            return (s(p.getName()) + "|" + s(p.getIn())).trim();
+    private static String translateLegacyKeyToCanonical(String key) {
+        if (key == null || key.isEmpty()) return "";
+        int sep = key.lastIndexOf('|');
+        if (sep <= 0 || sep == key.length() - 1) return key;
+
+        String left = key.substring(0, sep);
+        String right = key.substring(sep + 1);
+
+        if ("body".equalsIgnoreCase(right)) {
+            return "body:" + SpecOpsContext.wildcardArrays(left).toLowerCase(Locale.ROOT);
         }
+
+        return right.toLowerCase(Locale.ROOT) + ":" + left.toLowerCase(Locale.ROOT);
     }
 
     private static boolean endsWithIdish(String n) {
