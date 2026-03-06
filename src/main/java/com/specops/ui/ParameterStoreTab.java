@@ -341,12 +341,41 @@ public class ParameterStoreTab extends JPanel {
         }
 
         commitEditsIfAny();
-        int count = ValueGenerator.generateValues(context.getGlobalParameterStore(), typeFilter);
-        refreshData();
-        JOptionPane.showMessageDialog(this,
-                "Generated values for " + count + " parameters.",
-                "Generation Complete", JOptionPane.INFORMATION_MESSAGE);
-        emitChanged();
+        setCursor(Cursor.getPredefinedCursor(Cursor.WAIT_CURSOR));
+        setParameterMutationsBlocked(true);
+
+        new SwingWorker<Integer, Void>() {
+            @Override
+            protected Integer doInBackground() {
+                return ValueGenerator.generateValues(context.getGlobalParameterStore(), typeFilter);
+            }
+
+            @Override
+            protected void done() {
+                setCursor(Cursor.getDefaultCursor());
+                setParameterMutationsBlocked(false);
+                try {
+                    int count = get();
+                    refreshData();
+                    JOptionPane.showMessageDialog(ParameterStoreTab.this,
+                            "Generated values for " + count + " parameters.",
+                            "Generation Complete", JOptionPane.INFORMATION_MESSAGE);
+                    emitChanged();
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    context.api.logging().logToError("Value generation interrupted: " + ex.getMessage());
+                    JOptionPane.showMessageDialog(ParameterStoreTab.this,
+                            "Value generation was interrupted.",
+                            "Generation Error", JOptionPane.ERROR_MESSAGE);
+                } catch (ExecutionException ex) {
+                    Throwable cause = ex.getCause() != null ? ex.getCause() : ex;
+                    context.api.logging().logToError("Value generation failed: " + cause.getMessage());
+                    JOptionPane.showMessageDialog(ParameterStoreTab.this,
+                            "Value generation failed: " + cause.getMessage(),
+                            "Generation Error", JOptionPane.ERROR_MESSAGE);
+                }
+            }
+        }.execute();
     }
 
     private void exportValues() {
