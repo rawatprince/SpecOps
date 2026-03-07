@@ -1,7 +1,7 @@
 # SpecOps
 
 [![CI](https://github.com/rawatprince/SpecOps/actions/workflows/ci.yml/badge.svg)](https://github.com/rawatprince/SpecOps/actions/workflows/ci.yml)
-![Java](https://img.shields.io/badge/java-17%2B-blue)
+![Java](https://img.shields.io/badge/java-21%2B-blue)
 ![Burp](https://img.shields.io/badge/Burp-2025.7%2B-orange)
 ![License](https://img.shields.io/github/license/rawatprince/SpecOps?cacheSeconds=300)
 ![Release](https://img.shields.io/github/v/release/rawatprince/SpecOps?display_name=tag&sort=semver)
@@ -26,7 +26,7 @@ See the full **[Wiki Guide](../../wiki)** for screenshots and detailed usage.
 
 ### Prerequisites
 - Burp Suite **2025.7+** (for Montoya API support).
-- Java **17+**.
+- Java **21+**.
 
 ### Method 1: Prebuilt Release (Recommended)
 1. Download the latest `SpecOps-vX.Y.Z.jar` from the [**Releases**](https://github.com/rawatprince/SpecOps/releases) page.
