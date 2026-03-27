@@ -27,6 +27,6 @@ public class BurpExtender implements BurpExtension {
             }
         });
 
-        api.logging().logToOutput("SpecOps loaded successfully.");
+        api.logging().logToOutput("SpecOps loaded successfully by pr1nc3.");
     }
 }
