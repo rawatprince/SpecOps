@@ -8,7 +8,7 @@ plugins {
 
 group = "com.specops"
 
-version = "1.3.0"
+version = "1.3.1"
 
 repositories {
     mavenCentral()
@@ -16,8 +16,8 @@ repositories {
 
 dependencies {
     compileOnly("net.portswigger.burp.extensions:montoya-api:2026.2")
-    implementation("io.swagger.parser.v3:swagger-parser:2.1.38")
-    implementation("io.swagger.parser.v3:swagger-parser-v2-converter:2.1.38")
+    implementation("io.swagger.parser.v3:swagger-parser:2.1.39")
+    implementation("io.swagger.parser.v3:swagger-parser-v2-converter:2.1.39")
 }
 
 java {
@@ -51,7 +51,7 @@ tasks.withType<ShadowJar> {
             "Burp-Extension-Name" to "SpecOps",
             "Implementation-Title" to "SpecOps",
             "Implementation-Version" to project.version.toString(),
-            "Built-By" to System.getProperty("user.name"),
+            "Built-By" to "Prince Rawat",
             "Build-Timestamp" to Instant.now().toString()
         )
     }

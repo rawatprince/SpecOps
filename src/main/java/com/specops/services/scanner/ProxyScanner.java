@@ -1,13 +1,12 @@
 package com.specops.services.scanner;
 
 import burp.api.montoya.http.message.params.HttpParameterType;
+import burp.api.montoya.proxy.ProxyHistoryFilter;
 import burp.api.montoya.proxy.ProxyHttpRequestResponse;
 import com.specops.SpecOpsContext;
 import com.specops.domain.Parameter;
 import io.swagger.v3.core.util.Json;
 
-import java.lang.reflect.InvocationTargetException;
-import java.lang.reflect.Method;
 import java.net.URLDecoder;
 import java.nio.charset.StandardCharsets;
 import java.util.*;
@@ -388,69 +387,17 @@ public class ProxyScanner {
         return updatedCount;
     }
 
-    @SuppressWarnings("unchecked")
     private List<ProxyHttpRequestResponse> filteredHistory(String targetDomain) {
-        Object proxyApi = context.api.proxy();
-
+        ProxyHistoryFilter filter = entry -> {
+            String host = entry.finalRequest().httpService().host();
+            return hostMatchesTarget(host, targetDomain);
+        };
         try {
-            Class<?> filterClass = Class.forName("burp.api.montoya.proxy.ProxyHistoryFilter");
-            Method historyWithFilter = Arrays.stream(proxyApi.getClass().getMethods())
-                    .filter(m -> m.getName().equals("history"))
-                    .filter(m -> m.getParameterCount() == 1)
-                    .filter(m -> m.getParameterTypes()[0].equals(filterClass))
-                    .findFirst()
-                    .orElse(null);
-
-            if (historyWithFilter == null || !filterClass.isInterface()) {
-                context.api.logging().logToOutput("ProxyScanner using full proxy history path (ProxyHistoryFilter unavailable).");
-                return context.api.proxy().history();
-            }
-
-            final boolean[] filterInvocationFailed = {false};
-            Object filter = java.lang.reflect.Proxy.newProxyInstance(
-                    filterClass.getClassLoader(),
-                    new Class<?>[]{filterClass},
-                    (ignoredProxy, method, args) -> {
-                        switch (method.getName()) {
-                            case "equals":
-                                return ignoredProxy == (args != null && args.length == 1 ? args[0] : null);
-                            case "hashCode":
-                                return System.identityHashCode(ignoredProxy);
-                            case "toString":
-                                return "ProxyHistoryFilterProxy(" + targetDomain + ")";
-                            case "matches":
-                                if (!method.getReturnType().equals(boolean.class) || args == null || args.length != 1 || args[0] == null) {
-                                    return false;
-                                }
-
-                                try {
-                                    Object entry = args[0];
-                                    Method finalRequestMethod = entry.getClass().getMethod("finalRequest");
-                                    Object request = finalRequestMethod.invoke(entry);
-                                    Method httpServiceMethod = request.getClass().getMethod("httpService");
-                                    Object service = httpServiceMethod.invoke(request);
-                                    Method hostMethod = service.getClass().getMethod("host");
-                                    String host = (String) hostMethod.invoke(service);
-                                    return hostMatchesTarget(host, targetDomain);
-                                } catch (ReflectiveOperationException | RuntimeException malformedEntry) {
-                                    filterInvocationFailed[0] = true;
-                                    return false;
-                                }
-                            default:
-                                return false;
-                        }
-                    });
-
-            Object filteredHistory = historyWithFilter.invoke(proxyApi, filter);
-            if (filterInvocationFailed[0]) {
-                throw new RuntimeException("ProxyHistoryFilter invocation failed; falling back to full history.");
-            }
-            if (filteredHistory instanceof List<?>) {
-                context.api.logging().logToOutput("ProxyScanner using filtered proxy history path.");
-                return (List<ProxyHttpRequestResponse>) filteredHistory;
-            }
-        } catch (ClassNotFoundException | IllegalAccessException | InvocationTargetException | RuntimeException e) {
-            context.api.logging().logToError("ProxyHistoryFilter unavailable, falling back to full history scan: " + e.getMessage());
+            List<ProxyHttpRequestResponse> filteredHistory = context.api.proxy().history(filter);
+            context.api.logging().logToOutput("ProxyScanner using filtered proxy history path.");
+            return filteredHistory;
+        } catch (RuntimeException e) {
+            context.api.logging().logToError("ProxyHistoryFilter failed, falling back to full history scan: " + e.getMessage());
         }
 
         context.api.logging().logToOutput("ProxyScanner using full proxy history path.");
