@@ -357,14 +357,14 @@ public class EndpointsTab extends JPanel {
     }
 
     private void sendSelectedToIntruder() {
-        getSelectedEndpoints().stream().findFirst().ifPresent(endpoint -> {
-            // One Intruder request per server when iterate is on, otherwise the selected server.
+        // Send every selected endpoint (one Intruder request per server when iterate is on).
+        for (Endpoint endpoint : getSelectedEndpoints()) {
             for (HttpRequest request : safeBuildRequests(endpoint)) {
                 if (request != null) {
                     context.api.intruder().sendToIntruder(request);
                 }
             }
-        });
+        }
     }
 
     private void pingSelectedEndpointsWorker() {
