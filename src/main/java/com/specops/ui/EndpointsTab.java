@@ -21,10 +21,12 @@ import java.awt.event.MouseEvent;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -282,11 +284,31 @@ public class EndpointsTab extends JPanel {
         for (Endpoint endpoint : getSelectedEndpoints()) {
             // buildRequestsForBulkSend yields one request per server when iterate is on,
             // and a single request for the selected server otherwise.
-            for (HttpRequest request : requestFactory.buildRequestsForBulkSend(endpoint)) {
+            List<HttpRequest> requests = requestFactory.buildRequestsForBulkSend(endpoint);
+
+            // describeTarget is scheme://host[:port]; servers that differ only by base path
+            // (e.g. /v1 vs /v2 on the same host) would collide. Add an ordinal only when needed
+            // so the common case (distinct hosts/schemes) keeps clean tab names.
+            boolean ordinalNeeded = false;
+            if (iterate && requests.size() > 1) {
+                Set<String> seen = new HashSet<>();
+                for (HttpRequest r : requests) {
+                    if (r != null && !seen.add(AttackResult.describeTarget(r))) {
+                        ordinalNeeded = true;
+                        break;
+                    }
+                }
+            }
+
+            for (int i = 0; i < requests.size(); i++) {
+                HttpRequest request = requests.get(i);
                 if (request == null) continue;
                 String tabName = endpoint.getMethod() + " " + endpoint.getPath();
                 if (iterate) {
                     tabName += " @ " + AttackResult.describeTarget(request);
+                    if (ordinalNeeded) {
+                        tabName += " #" + (i + 1);
+                    }
                 }
                 context.api.repeater().sendToRepeater(request, tabName);
             }
