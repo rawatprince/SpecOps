@@ -6,9 +6,11 @@ import com.specops.domain.Endpoint;
 import com.specops.domain.Parameter;
 import com.specops.domain.rules.HeaderRule;
 import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.servers.Server;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -334,6 +336,38 @@ public class SpecOpsContext {
     public void setIterateAcrossAllServers(boolean iterateAcrossAllServers) {
         this.iterateAcrossAllServers = iterateAcrossAllServers;
         notifyServersChanged();
+    }
+
+    /**
+     * Human-readable target for the Endpoints Workbench: the resolved selected-server URL,
+     * or an all-servers summary when iterate mode is on.
+     */
+    public String getServerTargetLabel() {
+        if (openAPI == null || openAPI.getServers() == null || openAPI.getServers().isEmpty()) {
+            return "(no server)";
+        }
+        List<Server> servers = openAPI.getServers();
+        if (iterateAcrossAllServers) {
+            return "All servers (" + servers.size() + ")";
+        }
+        int idx = Math.min(Math.max(selectedServerIndex, 0), servers.size() - 1);
+        return resolveServerUrl(servers.get(idx), idx);
+    }
+
+    /** Resolve a server URL template against its variable defaults and any user overrides. */
+    private String resolveServerUrl(Server server, int serverIndex) {
+        if (server == null || server.getUrl() == null) return "";
+        String url = server.getUrl();
+        Map<String, String> values = new HashMap<>();
+        if (server.getVariables() != null) {
+            server.getVariables().forEach((k, v) ->
+                    values.put(k, v != null && v.getDefault() != null ? v.getDefault() : ""));
+        }
+        values.putAll(getServerVariableOverrides(serverIndex));
+        for (Map.Entry<String, String> e : values.entrySet()) {
+            url = url.replace("{" + e.getKey() + "}", e.getValue() == null ? "" : e.getValue());
+        }
+        return url;
     }
 
     public void setAuthToken(String schemeName, String value) {

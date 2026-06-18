@@ -111,10 +111,11 @@ public class EndpointsTab extends JPanel {
         endpointsTable.setDefaultRenderer(Object.class, new CustomCellRenderer());
 
         endpointsTable.getColumnModel().getColumn(0).setPreferredWidth(60);  // Method
-        endpointsTable.getColumnModel().getColumn(1).setPreferredWidth(350); // Path
-        endpointsTable.getColumnModel().getColumn(2).setPreferredWidth(400); // Summary
+        endpointsTable.getColumnModel().getColumn(1).setPreferredWidth(300); // Path
+        endpointsTable.getColumnModel().getColumn(2).setPreferredWidth(340); // Summary
         endpointsTable.getColumnModel().getColumn(3).setPreferredWidth(100); // Binding Status
         endpointsTable.getColumnModel().getColumn(3).setCellRenderer(new BindingStatusCellRenderer());
+        endpointsTable.getColumnModel().getColumn(4).setPreferredWidth(220); // Server
 
         endpointsTable.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
@@ -151,6 +152,11 @@ public class EndpointsTab extends JPanel {
             tableModel.recalculateBindingStatus();
             tableModel.fireTableDataChanged();
             updateCountLabel();
+        }));
+        // Reflect server selection / iterate changes in the Server column and the request preview.
+        context.addServersUpdateListener(v -> runOnEdt(() -> {
+            tableModel.fireTableDataChanged();
+            updatePreviewPanels();
         }));
 
         // Wire actions

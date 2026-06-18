@@ -14,7 +14,7 @@ import java.util.Map;
 public class EndpointTableModel extends AbstractTableModel {
 
     private final SpecOpsContext context;
-    private final String[] columnNames = {"Method", "Path", "Summary", "Binding Status"};
+    private final String[] columnNames = {"Method", "Path", "Summary", "Binding Status", "Server"};
 
     public EndpointTableModel(SpecOpsContext context) {
         this.context = context;
@@ -47,6 +47,8 @@ public class EndpointTableModel extends AbstractTableModel {
                 return endpoint.getSummary();
             case 3:
                 return endpoint.getBindingStatus();
+            case 4:
+                return context.getServerTargetLabel();
             default:
                 return null;
         }
