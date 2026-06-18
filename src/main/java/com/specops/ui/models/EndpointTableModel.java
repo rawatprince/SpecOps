@@ -37,7 +37,14 @@ public class EndpointTableModel extends AbstractTableModel {
 
     @Override
     public Object getValueAt(int rowIndex, int columnIndex) {
-        Endpoint endpoint = context.getEndpoints().get(rowIndex);
+        Endpoint endpoint;
+        try {
+            endpoint = context.getEndpoints().get(rowIndex);
+        } catch (IndexOutOfBoundsException ex) {
+            // The shared endpoint list can be swapped on a background thread mid-read;
+            // render an empty cell rather than crash the EDT.
+            return null;
+        }
         switch (columnIndex) {
             case 0:
                 return endpoint.getMethod().toString();

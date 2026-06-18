@@ -188,7 +188,12 @@ public class EndpointsTab extends JPanel {
         int[] selectedViewRows = endpointsTable.getSelectedRows();
         if (selectedViewRows.length == 1) {
             int modelRow = endpointsTable.convertRowIndexToModel(selectedViewRows[0]);
-            Endpoint selectedEndpoint = context.getEndpoints().get(modelRow);
+            List<Endpoint> endpoints = context.getEndpoints();
+            if (modelRow < 0 || modelRow >= endpoints.size()) {
+                requestViewer.setRequest(null);
+                return;
+            }
+            Endpoint selectedEndpoint = endpoints.get(modelRow);
             HttpRequest request = null;
             try {
                 request = requestFactory.buildRequest(selectedEndpoint);
@@ -252,10 +257,12 @@ public class EndpointsTab extends JPanel {
 
     private List<Endpoint> getSelectedEndpoints() {
         List<Endpoint> selected = new ArrayList<>();
-        int[] selectedViewRows = endpointsTable.getSelectedRows();
-        for (int viewRow : selectedViewRows) {
+        List<Endpoint> endpoints = context.getEndpoints();
+        for (int viewRow : endpointsTable.getSelectedRows()) {
             int modelRow = endpointsTable.convertRowIndexToModel(viewRow);
-            selected.add(context.getEndpoints().get(modelRow));
+            if (modelRow >= 0 && modelRow < endpoints.size()) {
+                selected.add(endpoints.get(modelRow));
+            }
         }
         return selected;
     }

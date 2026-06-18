@@ -1,0 +1,167 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>SpecOps PR — Workflow Results</title>
+<style>
+  :root{
+    --bg:#0f1117; --panel:#171a22; --panel2:#1d212b; --line:#2a2f3a;
+    --ink:#e7ebf3; --mut:#9aa3b2; --dim:#6b7280;
+    --green:#34d399; --greenbg:#0e2a22;
+    --amber:#fbbf24; --amberbg:#2a2410;
+    --red:#f87171; --redbg:#2a1414;
+    --blue:#60a5fa; --bluebg:#11233f;
+    --accent:#ff7a45;
+  }
+  *{box-sizing:border-box}
+  body{margin:0;background:var(--bg);color:var(--ink);
+    font-family:-apple-system,BlinkMacSystemFont,"Segoe UI",Roboto,Helvetica,Arial,sans-serif;
+    line-height:1.5;-webkit-font-smoothing:antialiased}
+  .wrap{max-width:1000px;margin:0 auto;padding:28px 20px 64px}
+  header.top{border-bottom:1px solid var(--line);padding-bottom:20px;margin-bottom:26px}
+  .eyebrow{color:var(--accent);font-weight:700;letter-spacing:.08em;text-transform:uppercase;font-size:12px}
+  h1{font-size:26px;margin:6px 0 4px;letter-spacing:-.01em}
+  .sub{color:var(--mut);font-size:14px}
+  .verdict{display:flex;gap:12px;flex-wrap:wrap;margin-top:18px}
+  .vchip{flex:1;min-width:220px;background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:14px 16px}
+  .vchip .lbl{font-size:11px;text-transform:uppercase;letter-spacing:.06em;color:var(--dim)}
+  .vchip .val{font-size:16px;font-weight:700;margin-top:4px;display:flex;align-items:center;gap:8px}
+  .ok{color:var(--green)} .warn{color:var(--amber)} .bad{color:var(--red)}
+  h2{font-size:18px;margin:34px 0 12px;letter-spacing:-.01em}
+  h2 .n{color:var(--dim);font-weight:600;font-size:14px;margin-left:6px}
+  .cards{display:grid;grid-template-columns:repeat(auto-fit,minmax(220px,1fr));gap:12px}
+  .card{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px}
+  .card h3{margin:0 0 2px;font-size:15px}
+  .card .meta{color:var(--dim);font-size:12px;margin-bottom:10px}
+  .card .res{font-size:13px;color:var(--mut)}
+  .card .res b{color:var(--ink)}
+  .stat{display:inline-block;background:var(--panel2);border:1px solid var(--line);border-radius:999px;
+    padding:2px 9px;font-size:11px;color:var(--mut);margin:2px 4px 2px 0}
+  .badge{display:inline-block;border-radius:999px;padding:2px 9px;font-size:11px;font-weight:700;letter-spacing:.02em}
+  .b-fixed{background:var(--greenbg);color:var(--green);border:1px solid #1d4a3a}
+  .b-open{background:var(--amberbg);color:var(--amber);border:1px solid #4a4018}
+  .b-ok{background:var(--bluebg);color:var(--blue);border:1px solid #1d3a5f}
+  table{width:100%;border-collapse:collapse;margin-top:8px;font-size:13.5px}
+  .scroll{overflow-x:auto}
+  th,td{text-align:left;padding:9px 10px;border-bottom:1px solid var(--line);vertical-align:top}
+  th{color:var(--dim);font-size:11px;text-transform:uppercase;letter-spacing:.05em;font-weight:700}
+  td.sev{white-space:nowrap}
+  .sevtag{font-size:10.5px;font-weight:700;padding:1px 7px;border-radius:6px}
+  .s-high{background:var(--redbg);color:var(--red)} .s-med{background:var(--amberbg);color:var(--amber)}
+  .s-low{background:var(--panel2);color:var(--mut)}
+  .panel{background:var(--panel);border:1px solid var(--line);border-radius:12px;padding:16px 18px;margin-top:12px}
+  ul.tight{margin:8px 0 0;padding-left:18px} ul.tight li{margin:4px 0;color:var(--mut)}
+  ul.tight li b{color:var(--ink)}
+  code{background:var(--panel2);border:1px solid var(--line);border-radius:5px;padding:1px 5px;font-size:12px;
+    font-family:ui-monospace,SFMono-Regular,Menlo,monospace;color:#cbd5e1}
+  .foot{color:var(--dim);font-size:12px;margin-top:30px;border-top:1px solid var(--line);padding-top:14px}
+  .leg{font-size:12px;color:var(--dim);margin:6px 0 0}
+</style>
+</head>
+<body>
+<div class="wrap">
+
+  <header class="top">
+    <div class="eyebrow">SpecOps · feature/fix-listener-overwrite</div>
+    <h1>Multi-agent Workflow Results</h1>
+    <div class="sub">4 workflows · 201 agents · adversarially verified against PortSwigger / Montoya standards</div>
+    <div class="verdict">
+      <div class="vchip"><div class="lbl">Reviewer feedback</div><div class="val ok">✅ Fully addressed</div></div>
+      <div class="vchip"><div class="lbl">BApp acceptance</div><div class="val ok">✅ Likely accepted — 0 blockers</div></div>
+      <div class="vchip"><div class="lbl">Standards gaps found</div><div class="val ok">2 should-fix → both fixed</div></div>
+    </div>
+  </header>
+
+  <h2>The four runs</h2>
+  <div class="cards">
+    <div class="card">
+      <h3>1 · Full code audit</h3>
+      <div class="meta">136 agents · ~34 min · 4.48M tokens</div>
+      <div class="res"><b>110</b> raw → <b>67</b> confirmed · <b>43</b> refuted</div>
+      <div style="margin-top:8px"><span class="stat">whole codebase</span><span class="stat">7 dimensions + 7 deep dives</span></div>
+    </div>
+    <div class="card">
+      <h3>2 · End-to-end PR verify</h3>
+      <div class="meta">11 agents · ~4 min · 0.51M tokens</div>
+      <div class="res"><b>GO</b> — 10/10 flows pass · 1 cosmetic finding</div>
+      <div style="margin-top:8px"><span class="stat">parse→tabs</span><span class="stat">iterate send</span><span class="stat">CSV/JSON export</span></div>
+    </div>
+    <div class="card">
+      <h3>3 · buildRequest NPE hunt</h3>
+      <div class="meta">47 agents · ~35 min · 1.57M tokens</div>
+      <div class="res"><b>3</b> NPEs <b>reproduced</b> in a live JVM vs real Petstore</div>
+      <div style="margin-top:8px"><span class="stat">Petstore v2 (20 ops)</span><span class="stat">standalone repro</span></div>
+    </div>
+    <div class="card">
+      <h3>4 · Acceptance verdict</h3>
+      <div class="meta">7 agents · ~8 min · 0.41M tokens</div>
+      <div class="res"><b>LIKELY ACCEPTED</b> · compliant · 6/6 checks</div>
+      <div style="margin-top:8px"><span class="stat">reviewer compliance</span><span class="stat">9 Montoya rules</span></div>
+    </div>
+  </div>
+
+  <h2>4 · Acceptance verdict <span class="n">— the headline answer</span></h2>
+  <div class="scroll"><table>
+    <thead><tr><th>Standards check</th><th>Result</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td>Reviewer compliance (listener lists + both listeners, Servers populates, no hang)</td><td class="ok">compliant</td><td><span class="badge b-ok">PASS</span></td></tr>
+      <tr><td>EDT / Swing threading (no blocking on EDT)</td><td class="ok">compliant</td><td><span class="badge b-ok">PASS</span></td></tr>
+      <tr><td>HTTP via Montoya · logging · no legacy/deprecated API</td><td class="ok">compliant</td><td><span class="badge b-ok">PASS</span></td></tr>
+      <tr><td>SSRF (spec URL / <code>$ref</code> fetch)</td><td class="ok">acceptable for a pentest tool</td><td><span class="badge b-ok">PASS</span></td></tr>
+      <tr><td>PR's own new code (incl. dep bump, relative-URL fix)</td><td class="ok">no new violations</td><td><span class="badge b-ok">PASS</span></td></tr>
+      <tr><td>Cleanup on unload (Rule B) — bulk-ping worker not stopped</td><td class="warn">should-fix</td><td><span class="badge b-fixed">FIXED c46b680</span></td></tr>
+      <tr><td>Crash/hang on cyclic schemas (Rule I) — StackOverflow</td><td class="warn">should-fix</td><td><span class="badge b-fixed">FIXED d5b7f37</span></td></tr>
+    </tbody>
+  </table></div>
+  <p class="leg">0 confirmed blockers. The only 2 substantive gaps were closed after this run. 2 cosmetic “nice-to-have” items remain (hardcoded results-tab index, some dead code) — not rejection reasons.</p>
+
+  <h2>3 · NPE root-cause hunt <span class="n">— reproduced, then guarded</span></h2>
+  <div class="panel">
+    <p style="margin:0 0 6px;color:var(--mut)">Key finding: on a clean Petstore spec, iterating <b>every</b> operation threw <b>no exception</b> — so the “Send to Repeater not working” was <b>not</b> a build failure (it was the macOS menu bug). The hunt still reproduced 3 genuine latent NPEs for other specs:</p>
+    <div class="scroll"><table>
+      <thead><tr><th>Site</th><th>Trigger</th><th>Status</th></tr></thead>
+      <tbody>
+        <tr><td><code>tryInjectOneRequirement:514</code></td><td>security scheme with <code>type=null</code> + token set (reachable in normal flow)</td><td><span class="badge b-fixed">FIXED 1978d71</span></td></tr>
+        <tr><td><code>deref:806</code></td><td><code>components</code> present but <code>schemas</code> map null</td><td><span class="badge b-fixed">FIXED 1978d71</span></td></tr>
+        <tr><td><code>buildRequest:115</code></td><td>endpoint with null <code>operation</code></td><td><span class="badge b-fixed">FIXED 1978d71</span></td></tr>
+      </tbody>
+    </table></div>
+  </div>
+
+  <h2>2 · End-to-end PR verification <span class="n">— GO</span></h2>
+  <div class="panel">
+    <p style="margin:0;color:var(--mut)">All 10 traced flows passed: parse→all-tabs refresh, Servers no-hang loop, iterate Ping, iterate Repeater/Intruder, <code>describeTarget</code>, results-table regression, <b>CSV export</b>, <b>JSON export</b>, context thread-safety, compile/callers. One cosmetic finding (Repeater tab-name collision for same-host servers) → <span class="badge b-fixed">FIXED 18e48a3</span>.</p>
+  </div>
+
+  <h2>1 · Full code audit <span class="n">— 67 confirmed findings</span></h2>
+  <p class="leg">Mostly LOW/INFO quality items. The notable correctness/security findings and their current status:</p>
+  <div class="scroll"><table>
+    <thead><tr><th class="sev">Sev</th><th>Finding</th><th>Status</th></tr></thead>
+    <tbody>
+      <tr><td class="sev"><span class="sevtag s-high">HIGH</span></td><td>SSRF via external <code>$ref</code> resolution in spec</td><td><span class="badge b-open">OPEN · accepted</span></td></tr>
+      <tr><td class="sev"><span class="sevtag s-med">MED</span></td><td>Unload handler did no cleanup / bulk-ping worker not stopped</td><td><span class="badge b-fixed">FIXED</span></td></tr>
+      <tr><td class="sev"><span class="sevtag s-med">MED</span></td><td>Unbounded recursion on cyclic schemas → StackOverflow</td><td><span class="badge b-fixed">FIXED</span></td></tr>
+      <tr><td class="sev"><span class="sevtag s-med">MED</span></td><td><code>deref()</code> NPE when schemas map is null</td><td><span class="badge b-fixed">FIXED</span></td></tr>
+      <tr><td class="sev"><span class="sevtag s-med">MED</span></td><td>Query parameter values sent unencoded (no percent-encoding)</td><td><span class="badge b-open">OPEN</span></td></tr>
+      <tr><td class="sev"><span class="sevtag s-med">MED</span></td><td>Array schemas not <code>ArraySchema</code> silently dropped under resolveFully</td><td><span class="badge b-open">OPEN</span></td></tr>
+      <tr><td class="sev"><span class="sevtag s-med">MED</span></td><td>Body overrides dropped when top-level key absent from type map</td><td><span class="badge b-open">OPEN</span></td></tr>
+      <tr><td class="sev"><span class="sevtag s-med">MED</span></td><td>CSV import: wrong canonical key (jsonPath unset) / inflated import count</td><td><span class="badge b-open">OPEN</span></td></tr>
+      <tr><td class="sev"><span class="sevtag s-med">MED</span></td><td>Parameter-store CSV export swallows IOException but reports success</td><td><span class="badge b-open">OPEN</span></td></tr>
+      <tr><td class="sev"><span class="sevtag s-low">LOW</span></td><td>~55 further LOW/INFO quality items (dead code, magic numbers, no tests, etc.)</td><td><span class="badge b-open">OPEN · optional</span></td></tr>
+    </tbody>
+  </table></div>
+
+  <div class="panel" style="border-color:#3a2f18;background:#1c1810">
+    <b style="color:var(--amber)">Honest note on the OPEN items</b>
+    <p style="margin:6px 0 0;color:var(--mut)">None of the OPEN items is a rejection blocker or part of the reviewer's request — they're pre-existing bugs/polish the audit surfaced. The SSRF was judged acceptable for a tool a pentester runs against their own targets. The MEDIUM functional bugs (query encoding, array bodies, CSV import) are worth fixing eventually but are out of scope for this resubmission. Say the word and I'll spin a follow-up to clear them.</p>
+  </div>
+
+  <div class="foot">
+    Generated from workflow runs <code>whqno1vy6</code>, <code>waa9w041s</code>, <code>w45rbdhug</code>, <code>wdy44aat2</code>.
+    Every finding shown was adversarially re-verified (refute-by-default) against the actual code; “FIXED” entries are landed commits on <code>feature/fix-listener-overwrite</code>.
+  </div>
+
+</div>
+</body>
+</html>

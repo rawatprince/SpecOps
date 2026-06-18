@@ -699,37 +699,37 @@ public class ParameterStoreTab extends JPanel {
             w.write("name,path,in,value,type,source,locked");
             w.write("\r\n");
 
-            rows.stream()
+            List<Parameter> sorted = rows.stream()
                     .sorted(Comparator
                             .comparing((Parameter p) -> nz(p.getName()), Comparator.nullsFirst(String::compareToIgnoreCase))
                             .thenComparing(p -> nz(p.getIn()), Comparator.nullsFirst(String::compareToIgnoreCase)))
-                    .forEach(p -> {
-                        try {
-                            String inLoc  = nz(p.getIn());
-                            String raw    = nz(p.getName());
-                            String leaf   = "body".equalsIgnoreCase(inLoc) ? computeLeafName(raw) : raw;
-                            String pathCol= "body".equalsIgnoreCase(inLoc) ? raw : "";
+                    .toList();
 
-                            String value  = nz(p.getValue());
-                            String type   = nz(p.getType());
-                            String source = p.getSource() == null ? "" : p.getSource().name();
-                            String locked = String.valueOf(p.isLocked());
+            // Plain loop (not forEach) so a write failure propagates out of writeCsv and the
+            // export worker reports the error instead of a false "Export Successful".
+            for (Parameter p : sorted) {
+                String inLoc  = nz(p.getIn());
+                String raw    = nz(p.getName());
+                String leaf   = "body".equalsIgnoreCase(inLoc) ? computeLeafName(raw) : raw;
+                String pathCol= "body".equalsIgnoreCase(inLoc) ? raw : "";
 
-                            String line = String.join(",",
-                                    escapeCsv(leaf),
-                                    escapeCsv(pathCol),
-                                    escapeCsv(inLoc),
-                                    escapeCsv(value),
-                                    escapeCsv(type),
-                                    escapeCsv(source),
-                                    escapeCsv(locked)
-                            );
-                            w.write(line);
-                            w.write("\r\n");
-                        } catch (IOException ioe) {
-                            context.api.logging().logToError("CSV export error: " + ioe.getMessage());
-                        }
-                    });
+                String value  = nz(p.getValue());
+                String type   = nz(p.getType());
+                String source = p.getSource() == null ? "" : p.getSource().name();
+                String locked = String.valueOf(p.isLocked());
+
+                String line = String.join(",",
+                        escapeCsv(leaf),
+                        escapeCsv(pathCol),
+                        escapeCsv(inLoc),
+                        escapeCsv(value),
+                        escapeCsv(type),
+                        escapeCsv(source),
+                        escapeCsv(locked)
+                );
+                w.write(line);
+                w.write("\r\n");
+            }
         }
     }
 
@@ -772,6 +772,7 @@ public class ParameterStoreTab extends JPanel {
             String matchName = isBody ? (pathCsv.isEmpty() ? nameCsv : pathCsv) : nameCsv;
 
             boolean updatedAny = false;
+            boolean valueApplied = false; // count one import per CSV row, not once per matched parameter
 
             for (Parameter existing : store.values()) {
                 if (existing == null) continue;
@@ -793,7 +794,7 @@ public class ParameterStoreTab extends JPanel {
                 // set value only if not locked
                 if (!existing.isLocked()) {
                     existing.setValue(value);
-                    imported++;
+                    valueApplied = true;
                 }
 
                 // Always mark provenance as IMPORTED on CSV import
@@ -802,7 +803,10 @@ public class ParameterStoreTab extends JPanel {
                 updatedAny = true;
             }
 
-            if (updatedAny) continue;
+            if (updatedAny) {
+                if (valueApplied) imported++;
+                continue;
+            }
 
             // not found: create (only if we know 'in')
             if (!inCsv.isEmpty()) {
@@ -815,9 +819,13 @@ public class ParameterStoreTab extends JPanel {
                 String type = inherit != null && inherit.getType() != null ? inherit.getType() : "string";
                 boolean lockInherit = inherit != null && inherit.isLocked();
 
-                String newParamName = matchName;
+                // For body params the canonical key is derived from jsonPath, and request-body
+                // application reads jsonPath - so set it (and use the leaf as the display name).
+                String jsonPath = isBody ? com.specops.SpecOpsContext.wildcardArrays(matchName) : null;
+                String newParamName = isBody ? computeLeafName(matchName) : matchName;
 
                 Parameter p = new Parameter(newParamName, inCsv, type);
+                if (jsonPath != null) p.setJsonPath(jsonPath);
                 if (!lockedS.isEmpty()) p.setLocked(parseBool(lockedS));
                 else p.setLocked(lockInherit);
 
@@ -827,7 +835,6 @@ public class ParameterStoreTab extends JPanel {
                 }
 
                 p.setSource(Parameter.ValueSource.IMPORTED);
-                // rely on Parameter#getUniqueKey() to normalize body keys (jsonPath)
                 String k = com.specops.SpecOpsContext.canonicalKey(p);
                 store.put(k, p);
             }

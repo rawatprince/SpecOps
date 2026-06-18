@@ -5,7 +5,6 @@ import com.specops.domain.Endpoint;
 import com.specops.domain.Parameter;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
-import io.swagger.v3.oas.models.media.ArraySchema;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.parameters.RequestBody;
 import io.swagger.v3.parser.OpenAPIV3Parser;
@@ -266,9 +265,10 @@ public class OpenApiParser {
         if (schema == null || budget <= 0 || depth > MAX_SCHEMA_DEPTH) return budget;
         schema = composeAndDeref(oas, schema, depth);
 
-        // Handle arrays
-        if ("array".equals(schema.getType()) && schema instanceof ArraySchema as) {
-            Schema<?> items = derefSchema(oas, as.getItems());
+        // Handle arrays. Branch on the type alone: under resolveFully the resolved schema is
+        // often a plain Schema (not an ArraySchema instance), so an instanceof gate would drop array bodies.
+        if ("array".equals(schema.getType())) {
+            Schema<?> items = derefSchema(oas, schema.getItems());
             String childPath = path.isEmpty() ? "[]" : path + "[]";
 
             // If array items are scalar - add leaf param at childPath

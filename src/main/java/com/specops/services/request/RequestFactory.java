@@ -395,7 +395,8 @@ public class RequestFactory {
             }
 
             if (value != null && !value.isEmpty()) {
-                newRequest = newRequest.withAddedParameters(urlParameter(specParam.getName(), value));
+                newRequest = newRequest.withAddedParameters(
+                        urlParameter(encodePathSegment(specParam.getName()), encodePathSegment(value)));
             }
         }
         return newRequest;
@@ -425,7 +426,7 @@ public class RequestFactory {
 
                     if (scheme.getType() == SecurityScheme.Type.APIKEY && scheme.getIn() == SecurityScheme.In.QUERY) {
                         String name = scheme.getName() != null ? scheme.getName() : "api_key";
-                        out = out.withAddedParameters(urlParameter(name, token));
+                        out = out.withAddedParameters(urlParameter(encodePathSegment(name), encodePathSegment(token)));
                         addedSomething = true;
                     }
                 }
@@ -448,7 +449,7 @@ public class RequestFactory {
                     if (token == null || token.isBlank()) continue;
 
                     String name = scheme.getName() != null ? scheme.getName() : "api_key";
-                    out = out.withAddedParameters(urlParameter(name, token));
+                    out = out.withAddedParameters(urlParameter(encodePathSegment(name), encodePathSegment(token)));
                 }
             }
         }
@@ -1118,6 +1119,11 @@ public class RequestFactory {
                     top = "[]";
                 }
                 String kind = types.get(top);
+                if (kind == null) {
+                    // The schema-derived type map can be incomplete (additionalProperties,
+                    // composition, example-only keys). Fall back to the actual parsed body.
+                    kind = inferKindFromRoot(root, top);
+                }
                 if (kind == null) continue;
 
                 Object val = parseScalarOrJson(p.getValue());
@@ -1148,6 +1154,20 @@ public class RequestFactory {
         } catch (Throwable t) {
             return json;
         }
+    }
+
+    /** Infer a top-level key's kind (object/array/scalar) from the actual parsed body when the schema map omits it. */
+    private String inferKindFromRoot(Object root, String top) {
+        if ("[]".equals(top)) {
+            return (root instanceof java.util.List) ? "array" : null;
+        }
+        if (!(root instanceof java.util.Map)) return null;
+        java.util.Map<?, ?> map = (java.util.Map<?, ?>) root;
+        if (!map.containsKey(top)) return null;
+        Object node = map.get(top);
+        if (node instanceof java.util.Map) return "object";
+        if (node instanceof java.util.List) return "array";
+        return "string"; // scalar leaf
     }
 
     private void applyBodyOverridesToMap(Map<String, Object> map, Map<String, Parameter> store, String prefix) {
