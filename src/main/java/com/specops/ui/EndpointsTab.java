@@ -543,6 +543,22 @@ public class EndpointsTab extends JPanel {
         }
     }
 
+    /**
+     * Stop any in-flight bulk ping so no background work outlives extension unload.
+     * Thread-safe (no UI mutation): wakes a paused worker and interrupts a running one.
+     */
+    public void shutdown() {
+        stopAfterCurrent.set(true);
+        pauseRequested.set(false);
+        synchronized (pauseLock) {
+            pauseLock.notifyAll();
+        }
+        SwingWorker<?, ?> worker = activeWorker;
+        if (worker != null) {
+            worker.cancel(true);
+        }
+    }
+
     private void cancelActiveJob() {
         if (activeWorker != null && !activeWorker.isDone()) {
             stopAfterCurrent.set(true);
