@@ -30,6 +30,7 @@ public class SpecOpsContext {
     private final List<AttackResult> attackResults;
     private final List<HeaderRule> headerRules;
     private final Map<Integer, Map<String, String>> serverVariableOverrides;
+    private final Map<Integer, String> serverUrlOverrides = new ConcurrentHashMap<>();
     private final Map<String, String> authTokens;
 
     private OpenAPI openAPI;
@@ -117,6 +118,7 @@ public class SpecOpsContext {
 
         this.selectedServerIndex = 0;
         this.serverVariableOverrides.clear();
+        this.serverUrlOverrides.clear();
         this.iterateAcrossAllServers = false;
 
         notifyEndpointsChanged();
@@ -361,12 +363,40 @@ public class SpecOpsContext {
         if (openAPI == null || openAPI.getServers() == null || openAPI.getServers().isEmpty()) return "";
         List<Server> servers = openAPI.getServers();
         int idx = Math.min(Math.max(serverIndex, 0), servers.size() - 1);
+        String override = serverUrlOverrides.get(idx);
+        if (override != null && !override.isBlank()) return absolutize(override);
         return absolutize(resolveServerUrl(servers.get(idx), idx));
     }
 
-    /** Prepend the spec host to a relative server URL so it displays and targets as an absolute URL. */
+    /** A user-typed full server URL that overrides the spec's server (e.g. to replace a placeholder host). */
+    public String getServerUrlOverride(int serverIndex) { return serverUrlOverrides.get(serverIndex); }
+    public void setServerUrlOverride(int serverIndex, String url) {
+        if (url == null || url.isBlank()) {
+            serverUrlOverrides.remove(serverIndex);
+        } else {
+            serverUrlOverrides.put(serverIndex, url.trim());
+        }
+        notifyServersChanged();
+    }
+
+    /** True if any server (after overrides + variables) is still a path-relative URL needing a Base host. */
+    public boolean anyServerRelative() {
+        if (openAPI == null || openAPI.getServers() == null) return false;
+        List<Server> servers = openAPI.getServers();
+        for (int i = 0; i < servers.size(); i++) {
+            String override = serverUrlOverrides.get(i);
+            String u = (override != null && !override.isBlank()) ? override : resolveServerUrl(servers.get(i), i);
+            if (u != null && u.startsWith("/") && !u.startsWith("//")) return true;
+        }
+        return false;
+    }
+
+    /** Make a server URL absolute for display: prepend the Base host to a path-relative URL, add a scheme to a scheme-relative one. */
     private String absolutize(String url) {
         if (url == null || url.isEmpty()) return "";
+        if (url.startsWith("//")) { // scheme-relative, e.g. "//host/path"
+            return schemeOf(apiHost) + ":" + url;
+        }
         if (url.startsWith("/") && apiHost != null && !apiHost.isBlank()) {
             String host = apiHost.endsWith("/") ? apiHost.substring(0, apiHost.length() - 1) : apiHost;
             return host + url;
@@ -374,20 +404,28 @@ public class SpecOpsContext {
         return url;
     }
 
-    /** Resolve a server URL template against its variable defaults and any user overrides. */
+    private static String schemeOf(String hostUrl) {
+        if (hostUrl != null && hostUrl.contains("://")) return hostUrl.substring(0, hostUrl.indexOf("://"));
+        return "https";
+    }
+
+    /** Resolve a server URL template against its variable defaults and overrides; leave unresolved {tokens} in place. */
     private String resolveServerUrl(Server server, int serverIndex) {
         if (server == null || server.getUrl() == null) return "";
         String url = server.getUrl();
         Map<String, String> values = new HashMap<>();
         if (server.getVariables() != null) {
-            server.getVariables().forEach((k, v) ->
-                    values.put(k, v != null && v.getDefault() != null ? v.getDefault() : ""));
+            server.getVariables().forEach((k, v) -> {
+                if (v != null && v.getDefault() != null) values.put(k, v.getDefault());
+            });
         }
-        values.putAll(getServerVariableOverrides(serverIndex));
+        getServerVariableOverrides(serverIndex).forEach((k, v) -> {
+            if (v != null && !v.isBlank()) values.put(k, v);
+        });
         for (Map.Entry<String, String> e : values.entrySet()) {
             url = url.replace("{" + e.getKey() + "}", e.getValue() == null ? "" : e.getValue());
         }
-        return url;
+        return url; // any variable with no default/override stays as a literal "{name}" token
     }
 
     public void setAuthToken(String schemeName, String value) {

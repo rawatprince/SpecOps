@@ -43,11 +43,17 @@ public class ServersPanel extends JPanel {
 
         // Top row: server selector and iterate checkbox
         serverCombo = new JComboBox<>();
+        serverCombo.setEditable(true); // allow typing a custom server URL (e.g. to replace a placeholder host)
         serverCombo.addActionListener(e -> {
             if (refreshing) return; // programmatic repopulation, not a user action
             int idx = serverCombo.getSelectedIndex();
             if (idx >= 0) {
                 context.setSelectedServerIndex(idx);
+            } else {
+                // typed a custom URL that matches no listed server -> override the selected server
+                Object item = serverCombo.getEditor().getItem();
+                String typed = item == null ? "" : item.toString().trim();
+                context.setServerUrlOverride(context.getSelectedServerIndex(), typed.isEmpty() ? null : typed);
             }
             reloadVariables();
             updateResolvedBadge();
@@ -114,6 +120,7 @@ public class ServersPanel extends JPanel {
         installEnumEditors(); // after model is ready
         reloadVariables();
         updateResolvedBadge();
+        hostField.setEnabled(context.anyServerRelative());
 
         context.addServersUpdateListener(_void -> SwingUtilities.invokeLater(() -> {
             refreshing = true;
@@ -122,6 +129,7 @@ public class ServersPanel extends JPanel {
                 selectInitialServerIndex();
                 iterateAllServers.setSelected(context.isIterateAcrossAllServers());
                 hostField.setText(context.getApiHost() == null ? "" : context.getApiHost());
+                hostField.setEnabled(context.anyServerRelative()); // Base host only matters for relative server URLs
                 installEnumEditors();
                 reloadVariables();
                 updateResolvedBadge();

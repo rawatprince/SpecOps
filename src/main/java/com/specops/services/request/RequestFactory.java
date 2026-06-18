@@ -64,18 +64,10 @@ public class RequestFactory {
 
         URL parsed;
         try {
-            if (serverUrl.startsWith("/")) {
-                String host = context.getApiHost();
-                if (host == null) {
-                    context.api.logging().logToError("Server URL is relative, but no host is defined. Set the 'Base host' field in the Servers tab.");
-                    return null;
-                }
-                parsed = new URL(new URL(host), serverUrl);
-            } else {
-                parsed = new URL(serverUrl);
-            }
+            parsed = toServerUrl(serverUrl);
         } catch (MalformedURLException e) {
-            context.api.logging().logToError("Invalid server URL in spec: " + serverUrl);
+            context.api.logging().logToError("Cannot resolve server URL '" + serverUrl + "': " + e.getMessage()
+                    + " — set the 'Base host' field in the Servers tab, or edit the Server URL there if it is a placeholder.");
             return null;
         }
 
@@ -245,13 +237,20 @@ public class RequestFactory {
         if (context.isIterateAcrossAllServers()) {
             List<String> out = new ArrayList<>();
             for (int i = 0; i < servers.size(); i++) {
-                out.add(resolveServerUrlWithVars(servers.get(i), i));
+                out.add(effectiveServerUrl(servers.get(i), i));
             }
             return out;
         } else {
             int idx = Math.min(Math.max(context.getSelectedServerIndex(), 0), servers.size() - 1);
-            return List.of(resolveServerUrlWithVars(servers.get(idx), idx));
+            return List.of(effectiveServerUrl(servers.get(idx), idx));
         }
+    }
+
+    /** A user-typed server-URL override (from the editable Server combo) wins over the spec server. */
+    private String effectiveServerUrl(Server server, int serverIndex) {
+        String override = context.getServerUrlOverride(serverIndex);
+        if (override != null && !override.isBlank()) return override;
+        return resolveServerUrlWithVars(server, serverIndex);
     }
 
     private String resolveServerUrlWithVars(Server server, int serverIndex) {
@@ -261,18 +260,42 @@ public class RequestFactory {
         Map<String, String> vals = new HashMap<>();
         if (server.getVariables() != null) {
             for (var e : server.getVariables().entrySet()) {
-                String def = (e.getValue() != null && e.getValue().getDefault() != null)
-                        ? e.getValue().getDefault()
-                        : "";
-                vals.put(e.getKey(), def);
+                if (e.getValue() != null && e.getValue().getDefault() != null) {
+                    vals.put(e.getKey(), e.getValue().getDefault());
+                }
             }
         }
-        vals.putAll(context.getServerVariableOverrides(serverIndex));
+        // Only apply non-blank overrides; a variable with no default/override stays as a "{name}" token
+        // so the URL fails loudly rather than silently substituting an empty host segment.
+        context.getServerVariableOverrides(serverIndex).forEach((k, v) -> {
+            if (v != null && !v.isBlank()) vals.put(k, v);
+        });
 
         for (var e : vals.entrySet()) {
             url = url.replace("{" + e.getKey() + "}", e.getValue() == null ? "" : e.getValue());
         }
         return url;
+    }
+
+    /**
+     * Build an absolute URL from a server URL that may be absolute, scheme-relative ("//host/path"),
+     * or path-relative ("/base"). Path-relative URLs resolve against the configured Base host.
+     */
+    private URL toServerUrl(String serverUrl) throws MalformedURLException {
+        if (serverUrl == null) throw new MalformedURLException("null server URL");
+        if (serverUrl.startsWith("//")) { // scheme-relative: adopt Base host's scheme, else https
+            String host = context.getApiHost();
+            String scheme = (host != null && host.contains("://")) ? host.substring(0, host.indexOf("://")) : "https";
+            return new URL(scheme + ":" + serverUrl);
+        }
+        if (serverUrl.startsWith("/")) { // path-relative: needs a Base host
+            String host = context.getApiHost();
+            if (host == null || host.isBlank()) {
+                throw new MalformedURLException("relative server URL with no Base host: " + serverUrl);
+            }
+            return new URL(new URL(host), serverUrl);
+        }
+        return new URL(serverUrl);
     }
 
     // path, header, cookie, query helpers
@@ -1399,9 +1422,7 @@ public class RequestFactory {
 
         String originalBasePath = "";
         try {
-            URL first = bases.get(0).startsWith("/")
-                    ? new URL(new URL(Objects.requireNonNull(context.getApiHost())), bases.get(0))
-                    : new URL(bases.get(0));
+            URL first = toServerUrl(bases.get(0));
             originalBasePath = first.getPath();
             if ("/".equals(originalBasePath)) originalBasePath = "";
             if (originalBasePath.endsWith("/")) {
@@ -1419,9 +1440,7 @@ public class RequestFactory {
 
         for (String base : bases) {
             try {
-                URL u = base.startsWith("/")
-                        ? new URL(new URL(Objects.requireNonNull(context.getApiHost())), base)
-                        : new URL(base);
+                URL u = toServerUrl(base);
 
                 int port = u.getPort() == -1 ? u.getDefaultPort() : u.getPort();
                 boolean secure = "https".equalsIgnoreCase(u.getProtocol());
