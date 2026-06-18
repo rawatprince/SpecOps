@@ -1427,7 +1427,9 @@ public class RequestFactory {
                         .withBody(baseReq.body().toString());
 
                 out.add(copy);
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                context.api.logging().logToError(
+                        "Skipping server during multi-server send (could not resolve '" + base + "'): " + t.getMessage());
             }
         }
         return out;

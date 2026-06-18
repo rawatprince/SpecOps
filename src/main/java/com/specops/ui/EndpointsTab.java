@@ -278,10 +278,16 @@ public class EndpointsTab extends JPanel {
     }
 
     private void sendSelectedToRepeater() {
+        boolean iterate = context.isIterateAcrossAllServers();
         for (Endpoint endpoint : getSelectedEndpoints()) {
-            HttpRequest request = requestFactory.buildRequest(endpoint);
-            if (request != null) {
+            // buildRequestsForBulkSend yields one request per server when iterate is on,
+            // and a single request for the selected server otherwise.
+            for (HttpRequest request : requestFactory.buildRequestsForBulkSend(endpoint)) {
+                if (request == null) continue;
                 String tabName = endpoint.getMethod() + " " + endpoint.getPath();
+                if (iterate && request.httpService() != null) {
+                    tabName += " @ " + request.httpService().host();
+                }
                 context.api.repeater().sendToRepeater(request, tabName);
             }
         }
@@ -289,9 +295,11 @@ public class EndpointsTab extends JPanel {
 
     private void sendSelectedToIntruder() {
         getSelectedEndpoints().stream().findFirst().ifPresent(endpoint -> {
-            HttpRequest request = requestFactory.buildRequest(endpoint);
-            if (request != null) {
-                context.api.intruder().sendToIntruder(request);
+            // One Intruder request per server when iterate is on, otherwise the selected server.
+            for (HttpRequest request : requestFactory.buildRequestsForBulkSend(endpoint)) {
+                if (request != null) {
+                    context.api.intruder().sendToIntruder(request);
+                }
             }
         });
     }
