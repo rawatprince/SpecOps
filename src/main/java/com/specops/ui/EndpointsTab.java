@@ -181,7 +181,13 @@ public class EndpointsTab extends JPanel {
         if (selectedViewRows.length == 1) {
             int modelRow = endpointsTable.convertRowIndexToModel(selectedViewRows[0]);
             Endpoint selectedEndpoint = context.getEndpoints().get(modelRow);
-            HttpRequest request = requestFactory.buildRequest(selectedEndpoint);
+            HttpRequest request = null;
+            try {
+                request = requestFactory.buildRequest(selectedEndpoint);
+            } catch (Throwable t) {
+                context.api.logging().logToError(
+                        "Preview failed for " + selectedEndpoint.getMethod() + " " + selectedEndpoint.getPath() + ": " + t);
+            }
             requestViewer.setRequest(request);
         } else {
             requestViewer.setRequest(null);
@@ -279,12 +285,28 @@ public class EndpointsTab extends JPanel {
         });
     }
 
+    /**
+     * Build requests for one endpoint without ever throwing, so a single malformed
+     * endpoint can't abort an entire multi-select batch (e.g. Select All -> Send to Repeater).
+     * Returns one request per server when iterate is on, a single selected-server request otherwise.
+     */
+    private List<HttpRequest> safeBuildRequests(Endpoint endpoint) {
+        try {
+            return requestFactory.buildRequestsForBulkSend(endpoint);
+        } catch (Throwable t) {
+            context.api.logging().logToError(
+                    "Skipping endpoint " + endpoint.getMethod() + " " + endpoint.getPath()
+                            + " (could not build request): " + t);
+            return List.of();
+        }
+    }
+
     private void sendSelectedToRepeater() {
         boolean iterate = context.isIterateAcrossAllServers();
         for (Endpoint endpoint : getSelectedEndpoints()) {
-            // buildRequestsForBulkSend yields one request per server when iterate is on,
-            // and a single request for the selected server otherwise.
-            List<HttpRequest> requests = requestFactory.buildRequestsForBulkSend(endpoint);
+            // safeBuildRequests yields one request per server when iterate is on,
+            // and a single request for the selected server otherwise (never throws).
+            List<HttpRequest> requests = safeBuildRequests(endpoint);
 
             // describeTarget is scheme://host[:port]; servers that differ only by base path
             // (e.g. /v1 vs /v2 on the same host) would collide. Add an ordinal only when needed
@@ -318,7 +340,7 @@ public class EndpointsTab extends JPanel {
     private void sendSelectedToIntruder() {
         getSelectedEndpoints().stream().findFirst().ifPresent(endpoint -> {
             // One Intruder request per server when iterate is on, otherwise the selected server.
-            for (HttpRequest request : requestFactory.buildRequestsForBulkSend(endpoint)) {
+            for (HttpRequest request : safeBuildRequests(endpoint)) {
                 if (request != null) {
                     context.api.intruder().sendToIntruder(request);
                 }
@@ -340,19 +362,12 @@ public class EndpointsTab extends JPanel {
         final Map<Endpoint, List<HttpRequest>> plan = new LinkedHashMap<>();
         int tmpCount = 0;
 
-        if (context.isIterateAcrossAllServers()) {
-            for (Endpoint ep : endpointsToPing) {
-                List<HttpRequest> reqs = requestFactory.buildRequestsForBulkSend(ep);
-                plan.put(ep, reqs);
-                tmpCount += reqs.size();
-            }
-        } else {
-            for (Endpoint ep : endpointsToPing) {
-                HttpRequest req = requestFactory.buildRequest(ep);
-                List<HttpRequest> list = (req == null) ? List.of() : List.of(req);
-                plan.put(ep, list);
-                tmpCount += list.size();
-            }
+        // safeBuildRequests handles both iterate (one request per server) and single-server modes,
+        // and never throws, so one malformed endpoint can't abort the whole plan.
+        for (Endpoint ep : endpointsToPing) {
+            List<HttpRequest> reqs = safeBuildRequests(ep);
+            plan.put(ep, reqs);
+            tmpCount += reqs.size();
         }
 
         final int totalCount = tmpCount;
