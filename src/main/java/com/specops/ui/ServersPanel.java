@@ -105,41 +105,10 @@ public class ServersPanel extends JPanel {
     }
 
     private void updateResolvedBadge() {
-        String resolved = resolveSelectedServerUrl();
+        int idx = serverCombo.getSelectedIndex();
+        String resolved = idx < 0 ? "" : context.resolveAbsoluteServerUrl(idx);
         resolvedUrlBadge.setText("Server: " + (resolved == null || resolved.isBlank() ? "(none)" : resolved));
         resolvedUrlBadge.setToolTipText(resolvedUrlBadge.getText());
-    }
-
-    private String resolveSelectedServerUrl() {
-        OpenAPI oa = context.getOpenAPI();
-        if (oa == null || oa.getServers() == null || oa.getServers().isEmpty()) return null;
-        int idx = Math.min(Math.max(context.getSelectedServerIndex(), 0), oa.getServers().size() - 1);
-        Server s = oa.getServers().get(idx);
-        String template = s.getUrl() == null ? "" : s.getUrl();
-        Map<String, String> values = effectiveVariableValues(s, idx);
-        String resolved = template;
-        for (Map.Entry<String, String> e : values.entrySet()) {
-            String token = "{" + e.getKey() + "}";
-            resolved = resolved.replace(token, e.getValue() == null ? "" : e.getValue());
-        }
-        return resolved;
-    }
-
-    private Map<String, String> effectiveVariableValues(Server server, int serverIndex) {
-        Map<String, String> out = new HashMap<>();
-        Map<String, ServerVariable> specVars = server.getVariables();
-        if (specVars != null) {
-            for (var en : specVars.entrySet()) {
-                out.put(en.getKey(), Optional.ofNullable(en.getValue().getDefault()).orElse(""));
-            }
-        }
-        Map<String, String> overrides = context.getServerVariableOverrides(serverIndex);
-        for (var en : overrides.entrySet()) {
-            if (en.getValue() != null && !en.getValue().isBlank()) {
-                out.put(en.getKey(), en.getValue());
-            }
-        }
-        return out;
     }
 
     private void loadServersIntoCombo() {
@@ -154,12 +123,15 @@ public class ServersPanel extends JPanel {
             return;
         }
 
-        for (Server s : servers) {
+        // Show the absolute target (relative spec URLs like "/api/v3" resolved against the spec host).
+        for (int i = 0; i < servers.size(); i++) {
+            Server s = servers.get(i);
+            String url = context.resolveAbsoluteServerUrl(i);
             String label;
             if (s.getDescription() != null && !s.getDescription().isBlank()) {
-                label = s.getDescription() + "  [" + s.getUrl() + "]";
+                label = s.getDescription() + "  [" + url + "]";
             } else {
-                label = s.getUrl();
+                label = url;
             }
             serverCombo.addItem(label);
         }

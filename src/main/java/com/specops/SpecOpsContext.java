@@ -350,8 +350,28 @@ public class SpecOpsContext {
         if (iterateAcrossAllServers) {
             return "All servers (" + servers.size() + ")";
         }
-        int idx = Math.min(Math.max(selectedServerIndex, 0), servers.size() - 1);
-        return resolveServerUrl(servers.get(idx), idx);
+        return resolveAbsoluteServerUrl(selectedServerIndex);
+    }
+
+    /**
+     * Absolute target URL for a server index: variables resolved, and a relative server URL
+     * (e.g. "/api/v3") resolved against the host the spec was loaded from.
+     */
+    public String resolveAbsoluteServerUrl(int serverIndex) {
+        if (openAPI == null || openAPI.getServers() == null || openAPI.getServers().isEmpty()) return "";
+        List<Server> servers = openAPI.getServers();
+        int idx = Math.min(Math.max(serverIndex, 0), servers.size() - 1);
+        return absolutize(resolveServerUrl(servers.get(idx), idx));
+    }
+
+    /** Prepend the spec host to a relative server URL so it displays and targets as an absolute URL. */
+    private String absolutize(String url) {
+        if (url == null || url.isEmpty()) return "";
+        if (url.startsWith("/") && apiHost != null && !apiHost.isBlank()) {
+            String host = apiHost.endsWith("/") ? apiHost.substring(0, apiHost.length() - 1) : apiHost;
+            return host + url;
+        }
+        return url;
     }
 
     /** Resolve a server URL template against its variable defaults and any user overrides. */
