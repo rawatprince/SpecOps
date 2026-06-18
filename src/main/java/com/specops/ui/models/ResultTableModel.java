@@ -11,7 +11,7 @@ import javax.swing.table.AbstractTableModel;
 public class ResultTableModel extends AbstractTableModel {
 
     private final SpecOpsContext context;
-    private final String[] columnNames = {"Timestamp", "Method", "Path", "Status Code", "Response Length"};
+    private final String[] columnNames = {"Timestamp", "Method", "Path", "Server", "Status Code", "Response Length"};
 
     public ResultTableModel(SpecOpsContext context) {
         this.context = context;
@@ -35,7 +35,7 @@ public class ResultTableModel extends AbstractTableModel {
     @Override
     public Class<?> getColumnClass(int columnIndex) {
         // This helps the table's sorter to sort numbers correctly.
-        if (columnIndex == 3 || columnIndex == 4) {
+        if (columnIndex == 4 || columnIndex == 5) {
             return Integer.class;
         }
         return String.class;
@@ -55,8 +55,10 @@ public class ResultTableModel extends AbstractTableModel {
             case 2:
                 return result.getEndpoint().getPath();
             case 3:
-                return (int) result.getStatusCode();
+                return result.getTarget();
             case 4:
+                return (int) result.getStatusCode();
+            case 5:
                 return result.getResponseLength();
             default:
                 return null;

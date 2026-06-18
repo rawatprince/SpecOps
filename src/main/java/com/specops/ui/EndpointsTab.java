@@ -285,8 +285,8 @@ public class EndpointsTab extends JPanel {
             for (HttpRequest request : requestFactory.buildRequestsForBulkSend(endpoint)) {
                 if (request == null) continue;
                 String tabName = endpoint.getMethod() + " " + endpoint.getPath();
-                if (iterate && request.httpService() != null) {
-                    tabName += " @ " + request.httpService().host();
+                if (iterate) {
+                    tabName += " @ " + AttackResult.describeTarget(request);
                 }
                 context.api.repeater().sendToRepeater(request, tabName);
             }

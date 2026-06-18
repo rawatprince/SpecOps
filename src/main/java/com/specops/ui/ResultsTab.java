@@ -56,9 +56,10 @@ public class ResultsTab extends JPanel {
 
         resultsTable.getColumnModel().getColumn(0).setPreferredWidth(100); // Timestamp
         resultsTable.getColumnModel().getColumn(1).setPreferredWidth(60);  // Method
-        resultsTable.getColumnModel().getColumn(2).setPreferredWidth(350); // Path
-        resultsTable.getColumnModel().getColumn(3).setPreferredWidth(100); // Status Code
-        resultsTable.getColumnModel().getColumn(4).setPreferredWidth(120); // Length
+        resultsTable.getColumnModel().getColumn(2).setPreferredWidth(300); // Path
+        resultsTable.getColumnModel().getColumn(3).setPreferredWidth(220); // Server
+        resultsTable.getColumnModel().getColumn(4).setPreferredWidth(100); // Status Code
+        resultsTable.getColumnModel().getColumn(5).setPreferredWidth(120); // Length
 
         addRightClickMenu();
 
