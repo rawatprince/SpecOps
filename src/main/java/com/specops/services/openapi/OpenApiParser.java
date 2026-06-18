@@ -90,6 +90,14 @@ public class OpenApiParser {
 
         final OpenAPI oas = openAPI;
 
+        // OpenAPI 3 default: a spec with no declared servers implies a single server "/".
+        // Materialize it so the Servers tab and request builder have a (relative) base to resolve
+        // against the 'Base host' field, instead of treating the spec as unusable.
+        if (oas.getServers() == null || oas.getServers().isEmpty()) {
+            oas.setServers(new ArrayList<>(List.of(
+                    new io.swagger.v3.oas.models.servers.Server().url("/"))));
+        }
+
         // Build data model
         List<Endpoint> endpoints = new ArrayList<>();
         Map<String, Parameter> parameters = new HashMap<>();

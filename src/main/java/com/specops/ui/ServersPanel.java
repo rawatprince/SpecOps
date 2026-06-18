@@ -149,8 +149,18 @@ public class ServersPanel extends JPanel {
     private void updateResolvedBadge() {
         int idx = serverCombo.getSelectedIndex();
         String resolved = idx < 0 ? "" : context.resolveAbsoluteServerUrl(idx);
-        resolvedUrlBadge.setText("Server: " + (resolved == null || resolved.isBlank() ? "(none)" : resolved));
-        resolvedUrlBadge.setToolTipText(resolvedUrlBadge.getText());
+        boolean unresolved = resolved != null && resolved.startsWith("/") && !resolved.startsWith("//");
+        String text;
+        if (resolved == null || resolved.isBlank()) {
+            text = "Server: (none)";
+        } else if (unresolved) {
+            text = "Server: " + resolved + "  — set Base host to send requests";
+        } else {
+            text = "Server: " + resolved;
+        }
+        resolvedUrlBadge.setText(text);
+        resolvedUrlBadge.setForeground(unresolved ? Color.RED.darker() : null);
+        resolvedUrlBadge.setToolTipText(text);
     }
 
     private void loadServersIntoCombo() {
