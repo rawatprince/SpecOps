@@ -648,20 +648,6 @@ public class RequestFactory {
         return reqs;
     }
 
-    // legacy method
-    private String resolveServerUrl(Server server) {
-        String url = server.getUrl();
-        if (server.getVariables() != null && !server.getVariables().isEmpty()) {
-            for (Map.Entry<String, io.swagger.v3.oas.models.servers.ServerVariable> e : server.getVariables().entrySet()) {
-                String var = e.getKey();
-                io.swagger.v3.oas.models.servers.ServerVariable sv = e.getValue();
-                String def = sv != null && sv.getDefault() != null ? sv.getDefault() : "";
-                url = url.replace("{" + var + "}", def);
-            }
-        }
-        return url;
-    }
-
     // body building and synthesis
 
     private BuiltBody buildBodyFromSpecExamples(RequestBody rb,
