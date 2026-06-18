@@ -49,6 +49,11 @@ public class RequestFactory {
             return null;
         }
 
+        if (endpoint == null || endpoint.getOperation() == null || endpoint.getMethod() == null) {
+            context.api.logging().logToError("Cannot build request: endpoint has no operation or method.");
+            return null;
+        }
+
         // Resolve server URLs from context. For a single request build, first resolved URL.
         List<String> serverUrls = resolveServerBaseUrls();
         if (serverUrls.isEmpty()) {
@@ -511,6 +516,8 @@ public class RequestFactory {
             String token = context.getAuthToken(schemeName);
             if (token == null || token.isBlank()) continue;
 
+            if (scheme.getType() == null) continue; // unknown scheme type: nothing to inject (avoids NPE in switch)
+
             switch (scheme.getType()) {
                 case APIKEY -> {
                     SecurityScheme.In in = scheme.getIn();
@@ -803,9 +810,9 @@ public class RequestFactory {
     private Schema<?> deref(Schema<?> s) {
         if (s == null || s.get$ref() == null) return s;
         String name = s.get$ref().substring(s.get$ref().lastIndexOf('/') + 1);
-        return context.getOpenAPI().getComponents() != null
-                ? context.getOpenAPI().getComponents().getSchemas().getOrDefault(name, s)
-                : s;
+        var components = context.getOpenAPI().getComponents();
+        if (components == null || components.getSchemas() == null) return s;
+        return components.getSchemas().getOrDefault(name, s);
     }
 
     private RequestBody derefRequestBody(RequestBody rb) {
