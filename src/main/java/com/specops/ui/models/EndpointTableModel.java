@@ -14,7 +14,7 @@ import java.util.Map;
 public class EndpointTableModel extends AbstractTableModel {
 
     private final SpecOpsContext context;
-    private final String[] columnNames = {"Method", "Path", "Summary", "Binding Status"};
+    private final String[] columnNames = {"Method", "Path", "Summary", "Binding Status", "Server"};
 
     public EndpointTableModel(SpecOpsContext context) {
         this.context = context;
@@ -37,7 +37,14 @@ public class EndpointTableModel extends AbstractTableModel {
 
     @Override
     public Object getValueAt(int rowIndex, int columnIndex) {
-        Endpoint endpoint = context.getEndpoints().get(rowIndex);
+        Endpoint endpoint;
+        try {
+            endpoint = context.getEndpoints().get(rowIndex);
+        } catch (IndexOutOfBoundsException ex) {
+            // The shared endpoint list can be swapped on a background thread mid-read;
+            // render an empty cell rather than crash the EDT.
+            return null;
+        }
         switch (columnIndex) {
             case 0:
                 return endpoint.getMethod().toString();
@@ -47,6 +54,8 @@ public class EndpointTableModel extends AbstractTableModel {
                 return endpoint.getSummary();
             case 3:
                 return endpoint.getBindingStatus();
+            case 4:
+                return context.getServerTargetLabel();
             default:
                 return null;
         }

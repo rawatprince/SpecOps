@@ -41,7 +41,7 @@ public final class ResultExporter {
     }
 
     private static void writeCsvHeader(BufferedWriter writer, boolean includePayloads) throws IOException {
-        writer.write("timestamp,method,path,status_code,response_length");
+        writer.write("timestamp,method,path,server,status_code,response_length");
         if (includePayloads) {
             writer.write(",request,response");
         }
@@ -55,6 +55,8 @@ public final class ResultExporter {
         writer.write(csvField(result.getEndpoint().getMethod().toString()));
         writer.write(",");
         writer.write(csvField(result.getEndpoint().getPath()));
+        writer.write(",");
+        writer.write(csvField(result.getTarget()));
         writer.write(",");
         writer.write(String.valueOf(result.getStatusCode()));
         writer.write(",");
@@ -77,6 +79,8 @@ public final class ResultExporter {
         writer.write("    \"method\": \"" + jsonEscape(result.getEndpoint().getMethod().toString()) + "\",");
         writer.newLine();
         writer.write("    \"path\": \"" + jsonEscape(result.getEndpoint().getPath()) + "\",");
+        writer.newLine();
+        writer.write("    \"server\": \"" + jsonEscape(result.getTarget()) + "\",");
         writer.newLine();
         writer.write("    \"statusCode\": " + result.getStatusCode() + ",");
         writer.newLine();

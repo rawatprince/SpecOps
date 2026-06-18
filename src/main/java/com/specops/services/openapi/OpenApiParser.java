@@ -5,7 +5,6 @@ import com.specops.domain.Endpoint;
 import com.specops.domain.Parameter;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
-import io.swagger.v3.oas.models.media.ArraySchema;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.parameters.RequestBody;
 import io.swagger.v3.parser.OpenAPIV3Parser;
@@ -90,6 +89,14 @@ public class OpenApiParser {
         }
 
         final OpenAPI oas = openAPI;
+
+        // OpenAPI 3 default: a spec with no declared servers implies a single server "/".
+        // Materialize it so the Servers tab and request builder have a (relative) base to resolve
+        // against the 'Base host' field, instead of treating the spec as unusable.
+        if (oas.getServers() == null || oas.getServers().isEmpty()) {
+            oas.setServers(new ArrayList<>(List.of(
+                    new io.swagger.v3.oas.models.servers.Server().url("/"))));
+        }
 
         // Build data model
         List<Endpoint> endpoints = new ArrayList<>();
@@ -203,7 +210,7 @@ public class OpenApiParser {
             if (isJsonLike(mt) || mt.equals("application/x-www-form-urlencoded") || mt.equals("multipart/form-data")) {
                 Set<String> requiredSet = new HashSet<>();
                 if (schema.getRequired() != null) requiredSet.addAll(schema.getRequired());
-                budget = indexSchema("", schema, requiredSet, oas, out, budget);
+                budget = indexSchema("", schema, requiredSet, oas, out, budget, 0);
             } else {
                 addBodyParam(out, "", "body", "string", schema.getDescription(), false, schema);
             }
@@ -253,18 +260,23 @@ public class OpenApiParser {
         return 4;
     }
 
+    /** Hard cap on schema recursion depth to prevent StackOverflow on cyclic/self-referential schemas. */
+    private static final int MAX_SCHEMA_DEPTH = 30;
+
     @SuppressWarnings("unchecked")
     private int indexSchema(String path, Schema<?> schema, Set<String> requiredAtThisLevel,
                             OpenAPI oas,
                             Map<String, Parameter> out,
-                            int budget) {
+                            int budget,
+                            int depth) {
 
-        if (schema == null || budget <= 0) return budget;
-        schema = composeAndDeref(oas, schema);
+        if (schema == null || budget <= 0 || depth > MAX_SCHEMA_DEPTH) return budget;
+        schema = composeAndDeref(oas, schema, depth);
 
-        // Handle arrays
-        if ("array".equals(schema.getType()) && schema instanceof ArraySchema as) {
-            Schema<?> items = derefSchema(oas, as.getItems());
+        // Handle arrays. Branch on the type alone: under resolveFully the resolved schema is
+        // often a plain Schema (not an ArraySchema instance), so an instanceof gate would drop array bodies.
+        if ("array".equals(schema.getType())) {
+            Schema<?> items = derefSchema(oas, schema.getItems());
             String childPath = path.isEmpty() ? "[]" : path + "[]";
 
             // If array items are scalar - add leaf param at childPath
@@ -275,7 +287,7 @@ public class OpenApiParser {
             }
 
             // Items are complex - recurse without creating a node param
-            return indexSchema(childPath, items, Collections.emptySet(), oas, out, budget);
+            return indexSchema(childPath, items, Collections.emptySet(), oas, out, budget, depth + 1);
         }
 
         // Handle objects and maps
@@ -295,7 +307,7 @@ public class OpenApiParser {
                         addBodyParam(out, mapValuePath, "body", typeOf(vSchema), vSchema.getDescription(), false, vSchema);
                         budget--;
                     } else {
-                        budget = indexSchema(mapValuePath, vSchema, Collections.emptySet(), oas, out, budget);
+                        budget = indexSchema(mapValuePath, vSchema, Collections.emptySet(), oas, out, budget, depth + 1);
                     }
                 }
                 return budget;
@@ -322,7 +334,7 @@ public class OpenApiParser {
                         addBodyParam(out, childPath, "body", typeOf(ps), ps.getDescription(), req.contains(name), ps);
                         budget--;
                     } else {
-                        budget = indexSchema(childPath, ps, req.contains(name) ? req : Collections.emptySet(), oas, out, budget);
+                        budget = indexSchema(childPath, ps, req.contains(name) ? req : Collections.emptySet(), oas, out, budget, depth + 1);
                     }
                 }
             }
@@ -341,15 +353,16 @@ public class OpenApiParser {
         return s.getProperties() != null || s.getAdditionalProperties() != null || s.get$ref() != null;
     }
 
-    private Schema<?> composeAndDeref(OpenAPI oas, Schema<?> s) {
+    private Schema<?> composeAndDeref(OpenAPI oas, Schema<?> s, int depth) {
         s = derefSchema(oas, s);
+        if (depth > MAX_SCHEMA_DEPTH) return s;
         // oneOf: pick first
         if (s.getOneOf() != null && !s.getOneOf().isEmpty()) {
-            return composeAndDeref(oas, s.getOneOf().get(0));
+            return composeAndDeref(oas, s.getOneOf().get(0), depth + 1);
         }
         // anyOf: pick first
         if (s.getAnyOf() != null && !s.getAnyOf().isEmpty()) {
-            return composeAndDeref(oas, s.getAnyOf().get(0));
+            return composeAndDeref(oas, s.getAnyOf().get(0), depth + 1);
         }
         // allOf: merge properties
         if (s.getAllOf() != null && !s.getAllOf().isEmpty()) {

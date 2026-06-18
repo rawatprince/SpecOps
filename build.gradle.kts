@@ -3,21 +3,21 @@ import java.time.Instant
 
 plugins {
     `java-library`
-    id("com.gradleup.shadow") version "9.3.2"
+    id("com.gradleup.shadow") version "9.4.2"
 }
 
 group = "com.specops"
 
-version = "1.3.1"
+version = "1.4.0"
 
 repositories {
     mavenCentral()
 }
 
 dependencies {
-    compileOnly("net.portswigger.burp.extensions:montoya-api:2026.2")
-    implementation("io.swagger.parser.v3:swagger-parser:2.1.39")
-    implementation("io.swagger.parser.v3:swagger-parser-v2-converter:2.1.39")
+    compileOnly("net.portswigger.burp.extensions:montoya-api:2026.4")
+    implementation("io.swagger.parser.v3:swagger-parser:2.1.42")
+    implementation("io.swagger.parser.v3:swagger-parser-v2-converter:2.1.42")
 }
 
 java {

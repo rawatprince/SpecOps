@@ -16,15 +16,19 @@ import javax.swing.event.DocumentListener;
 import javax.swing.RowFilter;
 import javax.swing.table.TableRowSorter;
 import java.awt.*;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.text.SimpleDateFormat;
 import java.util.ArrayList;
 import java.util.Date;
+import java.util.HashSet;
 import java.util.LinkedHashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
+import java.util.Set;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -107,10 +111,11 @@ public class EndpointsTab extends JPanel {
         endpointsTable.setDefaultRenderer(Object.class, new CustomCellRenderer());
 
         endpointsTable.getColumnModel().getColumn(0).setPreferredWidth(60);  // Method
-        endpointsTable.getColumnModel().getColumn(1).setPreferredWidth(350); // Path
-        endpointsTable.getColumnModel().getColumn(2).setPreferredWidth(400); // Summary
+        endpointsTable.getColumnModel().getColumn(1).setPreferredWidth(300); // Path
+        endpointsTable.getColumnModel().getColumn(2).setPreferredWidth(340); // Summary
         endpointsTable.getColumnModel().getColumn(3).setPreferredWidth(100); // Binding Status
         endpointsTable.getColumnModel().getColumn(3).setCellRenderer(new BindingStatusCellRenderer());
+        endpointsTable.getColumnModel().getColumn(4).setPreferredWidth(220); // Server
 
         endpointsTable.getSelectionModel().addListSelectionListener(e -> {
             if (!e.getValueIsAdjusting()) {
@@ -136,17 +141,22 @@ public class EndpointsTab extends JPanel {
         add(mainSplitPane, BorderLayout.CENTER);
 
         // Refresh table when endpoints or parameters change
-        context.setEndpointsUpdateListener(v -> runOnEdt(this::refreshData));
-        context.setParametersUpdateListener(v -> runOnEdt(() -> {
+        context.addEndpointsUpdateListener(v -> runOnEdt(this::refreshData));
+        context.addParametersUpdateListener(v -> runOnEdt(() -> {
             tableModel.recalculateBindingStatus();
             tableModel.fireTableDataChanged();
             updatePreviewPanels();
             updateCountLabel();
         }));
-        context.setBindingsUpdateListener(() -> runOnEdt(() -> {
+        context.addBindingsUpdateListener(() -> runOnEdt(() -> {
             tableModel.recalculateBindingStatus();
             tableModel.fireTableDataChanged();
             updateCountLabel();
+        }));
+        // Reflect server selection / iterate changes in the Server column and the request preview.
+        context.addServersUpdateListener(v -> runOnEdt(() -> {
+            tableModel.fireTableDataChanged();
+            updatePreviewPanels();
         }));
 
         // Wire actions
@@ -178,8 +188,21 @@ public class EndpointsTab extends JPanel {
         int[] selectedViewRows = endpointsTable.getSelectedRows();
         if (selectedViewRows.length == 1) {
             int modelRow = endpointsTable.convertRowIndexToModel(selectedViewRows[0]);
-            Endpoint selectedEndpoint = context.getEndpoints().get(modelRow);
-            HttpRequest request = requestFactory.buildRequest(selectedEndpoint);
+            // Snapshot once so the bounds check and get() are consistent even if a
+            // background parse worker swaps the shared list (resetModel: clear()+addAll()).
+            List<Endpoint> endpoints = new ArrayList<>(context.getEndpoints());
+            if (modelRow < 0 || modelRow >= endpoints.size()) {
+                requestViewer.setRequest(null);
+                return;
+            }
+            Endpoint selectedEndpoint = endpoints.get(modelRow);
+            HttpRequest request = null;
+            try {
+                request = requestFactory.buildRequest(selectedEndpoint);
+            } catch (Throwable t) {
+                context.api.logging().logToError(
+                        "Preview failed for " + selectedEndpoint.getMethod() + " " + selectedEndpoint.getPath() + ": " + t);
+            }
             requestViewer.setRequest(request);
         } else {
             requestViewer.setRequest(null);
@@ -204,7 +227,15 @@ public class EndpointsTab extends JPanel {
                 @Override
                 public boolean include(Entry<? extends EndpointTableModel, ? extends Integer> entry) {
                     int modelRow = entry.getIdentifier();
-                    Endpoint endpoint = context.getEndpoints().get(modelRow);
+                    Endpoint endpoint;
+                    try {
+                        // The shared list can be swapped by a background parse worker
+                        // (resetModel: clear()+addAll()); treat an out-of-range row as
+                        // non-matching rather than throwing on the EDT.
+                        endpoint = context.getEndpoints().get(modelRow);
+                    } catch (IndexOutOfBoundsException e) {
+                        return false;
+                    }
                     return endpoint != null && matchesEndpoint(endpoint, needle);
                 }
             });
@@ -236,16 +267,26 @@ public class EndpointsTab extends JPanel {
 
     private List<Endpoint> getSelectedEndpoints() {
         List<Endpoint> selected = new ArrayList<>();
-        int[] selectedViewRows = endpointsTable.getSelectedRows();
-        for (int viewRow : selectedViewRows) {
+        // Snapshot once so the bounds check and get() are consistent even if a
+        // background parse worker swaps the shared list (resetModel: clear()+addAll()).
+        List<Endpoint> endpoints = new ArrayList<>(context.getEndpoints());
+        for (int viewRow : endpointsTable.getSelectedRows()) {
             int modelRow = endpointsTable.convertRowIndexToModel(viewRow);
-            selected.add(context.getEndpoints().get(modelRow));
+            if (modelRow >= 0 && modelRow < endpoints.size()) {
+                selected.add(endpoints.get(modelRow));
+            }
         }
         return selected;
     }
 
     private void addRightClickMenu() {
         JPopupMenu popupMenu = new JPopupMenu();
+
+        JMenuItem selectAllItem = new JMenuItem("Select All");
+        selectAllItem.addActionListener(e -> endpointsTable.selectAll());
+        popupMenu.add(selectAllItem);
+
+        popupMenu.addSeparator();
 
         JMenuItem sendToRepeaterItem = new JMenuItem("Send to Repeater");
         sendToRepeaterItem.addActionListener(e -> sendSelectedToRepeater());
@@ -261,39 +302,94 @@ public class EndpointsTab extends JPanel {
         pingEndpointsItem.addActionListener(e -> pingSelectedEndpointsWorker());
         popupMenu.add(pingEndpointsItem);
 
+        // Cross-platform popup trigger. On macOS the trigger can arrive on press OR release,
+        // and a Control-click is reported as BUTTON1 (so isRightMouseButton would miss it).
+        // e.isPopupTrigger() is the portable check.
         endpointsTable.addMouseListener(new MouseAdapter() {
             @Override
-            public void mousePressed(MouseEvent e) {
-                if (SwingUtilities.isRightMouseButton(e)) {
-                    int row = endpointsTable.rowAtPoint(e.getPoint());
-                    if (row >= 0 && !endpointsTable.isRowSelected(row)) {
-                        endpointsTable.setRowSelectionInterval(row, row);
-                    }
-                    if (endpointsTable.getSelectedRowCount() > 0) {
-                        popupMenu.show(e.getComponent(), e.getX(), e.getY());
-                    }
+            public void mousePressed(MouseEvent e) { maybeShowPopup(e); }
+
+            @Override
+            public void mouseReleased(MouseEvent e) { maybeShowPopup(e); }
+
+            private void maybeShowPopup(MouseEvent e) {
+                if (!e.isPopupTrigger()) return;
+                int row = endpointsTable.rowAtPoint(e.getPoint());
+                if (row >= 0 && !endpointsTable.isRowSelected(row)) {
+                    endpointsTable.setRowSelectionInterval(row, row);
                 }
+                popupMenu.show(e.getComponent(), e.getX(), e.getY());
             }
         });
+
+        // Make select-all reliable from the keyboard on every platform:
+        // Cmd+A on macOS, Ctrl+A elsewhere, and bind both so neither chord surprises the user.
+        InputMap im = endpointsTable.getInputMap(JComponent.WHEN_FOCUSED);
+        im.put(KeyStroke.getKeyStroke(KeyEvent.VK_A, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()), "selectAll");
+        im.put(KeyStroke.getKeyStroke(KeyEvent.VK_A, InputEvent.CTRL_DOWN_MASK), "selectAll");
+    }
+
+    /**
+     * Build requests for one endpoint without ever throwing, so a single malformed
+     * endpoint can't abort an entire multi-select batch (e.g. Select All -> Send to Repeater).
+     * Returns one request per server when iterate is on, a single selected-server request otherwise.
+     */
+    private List<HttpRequest> safeBuildRequests(Endpoint endpoint) {
+        try {
+            return requestFactory.buildRequestsForBulkSend(endpoint);
+        } catch (Throwable t) {
+            context.api.logging().logToError(
+                    "Skipping endpoint " + endpoint.getMethod() + " " + endpoint.getPath()
+                            + " (could not build request): " + t);
+            return List.of();
+        }
     }
 
     private void sendSelectedToRepeater() {
+        boolean iterate = context.isIterateAcrossAllServers();
         for (Endpoint endpoint : getSelectedEndpoints()) {
-            HttpRequest request = requestFactory.buildRequest(endpoint);
-            if (request != null) {
+            // safeBuildRequests yields one request per server when iterate is on,
+            // and a single request for the selected server otherwise (never throws).
+            List<HttpRequest> requests = safeBuildRequests(endpoint);
+
+            // describeTarget is scheme://host[:port]; servers that differ only by base path
+            // (e.g. /v1 vs /v2 on the same host) would collide. Add an ordinal only when needed
+            // so the common case (distinct hosts/schemes) keeps clean tab names.
+            boolean ordinalNeeded = false;
+            if (iterate && requests.size() > 1) {
+                Set<String> seen = new HashSet<>();
+                for (HttpRequest r : requests) {
+                    if (r != null && !seen.add(AttackResult.describeTarget(r))) {
+                        ordinalNeeded = true;
+                        break;
+                    }
+                }
+            }
+
+            for (int i = 0; i < requests.size(); i++) {
+                HttpRequest request = requests.get(i);
+                if (request == null) continue;
                 String tabName = endpoint.getMethod() + " " + endpoint.getPath();
+                if (iterate) {
+                    tabName += " @ " + AttackResult.describeTarget(request);
+                    if (ordinalNeeded) {
+                        tabName += " #" + (i + 1);
+                    }
+                }
                 context.api.repeater().sendToRepeater(request, tabName);
             }
         }
     }
 
     private void sendSelectedToIntruder() {
-        getSelectedEndpoints().stream().findFirst().ifPresent(endpoint -> {
-            HttpRequest request = requestFactory.buildRequest(endpoint);
-            if (request != null) {
-                context.api.intruder().sendToIntruder(request);
+        // Send every selected endpoint (one Intruder request per server when iterate is on).
+        for (Endpoint endpoint : getSelectedEndpoints()) {
+            for (HttpRequest request : safeBuildRequests(endpoint)) {
+                if (request != null) {
+                    context.api.intruder().sendToIntruder(request);
+                }
             }
-        });
+        }
     }
 
     private void pingSelectedEndpointsWorker() {
@@ -310,19 +406,12 @@ public class EndpointsTab extends JPanel {
         final Map<Endpoint, List<HttpRequest>> plan = new LinkedHashMap<>();
         int tmpCount = 0;
 
-        if (context.isIterateAcrossAllServers()) {
-            for (Endpoint ep : endpointsToPing) {
-                List<HttpRequest> reqs = requestFactory.buildRequestsForBulkSend(ep);
-                plan.put(ep, reqs);
-                tmpCount += reqs.size();
-            }
-        } else {
-            for (Endpoint ep : endpointsToPing) {
-                HttpRequest req = requestFactory.buildRequest(ep);
-                List<HttpRequest> list = (req == null) ? List.of() : List.of(req);
-                plan.put(ep, list);
-                tmpCount += list.size();
-            }
+        // safeBuildRequests handles both iterate (one request per server) and single-server modes,
+        // and never throws, so one malformed endpoint can't abort the whole plan.
+        for (Endpoint ep : endpointsToPing) {
+            List<HttpRequest> reqs = safeBuildRequests(ep);
+            plan.put(ep, reqs);
+            tmpCount += reqs.size();
         }
 
         final int totalCount = tmpCount;
@@ -470,6 +559,22 @@ public class EndpointsTab extends JPanel {
                     break;
                 }
             }
+        }
+    }
+
+    /**
+     * Stop any in-flight bulk ping so no background work outlives extension unload.
+     * Thread-safe (no UI mutation): wakes a paused worker and interrupts a running one.
+     */
+    public void shutdown() {
+        stopAfterCurrent.set(true);
+        pauseRequested.set(false);
+        synchronized (pauseLock) {
+            pauseLock.notifyAll();
+        }
+        SwingWorker<?, ?> worker = activeWorker;
+        if (worker != null) {
+            worker.cancel(true);
         }
     }
 

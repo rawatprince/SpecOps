@@ -27,6 +27,15 @@ public class ServersPanel extends JPanel {
     private final VariablesModel varsModel;
     private final JCheckBox iterateAllServers;
     private final JLabel resolvedUrlBadge = new JLabel("Server: (none)");
+    private final JTextField hostField = new JTextField();
+
+    /**
+     * EDT-only guard. Set while we are programmatically repopulating our own
+     * widgets in response to a context notification, so the widgets' action
+     * listeners don't write the change back into the context and trigger an
+     * endless notify -> refresh -> notify loop.
+     */
+    private boolean refreshing = false;
 
     public ServersPanel(SpecOpsContext context) {
         super(new BorderLayout(8, 8));
@@ -34,10 +43,17 @@ public class ServersPanel extends JPanel {
 
         // Top row: server selector and iterate checkbox
         serverCombo = new JComboBox<>();
+        serverCombo.setEditable(true); // allow typing a custom server URL (e.g. to replace a placeholder host)
         serverCombo.addActionListener(e -> {
+            if (refreshing) return; // programmatic repopulation, not a user action
             int idx = serverCombo.getSelectedIndex();
             if (idx >= 0) {
                 context.setSelectedServerIndex(idx);
+            } else {
+                // typed a custom URL that matches no listed server -> override the selected server
+                Object item = serverCombo.getEditor().getItem();
+                String typed = item == null ? "" : item.toString().trim();
+                context.setServerUrlOverride(context.getSelectedServerIndex(), typed.isEmpty() ? null : typed);
             }
             reloadVariables();
             updateResolvedBadge();
@@ -45,16 +61,49 @@ public class ServersPanel extends JPanel {
 
         iterateAllServers = new JCheckBox("Iterate across all servers when sending");
         iterateAllServers.setSelected(context.isIterateAcrossAllServers());
-        iterateAllServers.addActionListener(e ->
-                context.setIterateAcrossAllServers(iterateAllServers.isSelected())
-        );
+        iterateAllServers.addActionListener(e -> {
+            if (refreshing) return;
+            context.setIterateAcrossAllServers(iterateAllServers.isSelected());
+        });
+
+        // Base host: resolves relative server URLs (e.g. "/api/v3"). Auto-filled when loading
+        // from URL; editable so specs loaded from a file or pasted can still target a host.
+        hostField.setToolTipText("Base host for relative server URLs (e.g. /api/v3). "
+                + "Auto-filled from the URL you load; set it here for file/pasted specs.");
+        hostField.setText(context.getApiHost() == null ? "" : context.getApiHost());
+        Runnable commitHost = () -> {
+            if (refreshing) return; // programmatic sync, not a user edit
+            String h = hostField.getText() == null ? "" : hostField.getText().trim();
+            context.setApiHost(h.isEmpty() ? null : h);
+            context.notifyServersChanged();
+        };
+        hostField.addActionListener(e -> commitHost.run());
+        hostField.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusLost(java.awt.event.FocusEvent e) { commitHost.run(); }
+        });
+
+        JLabel serverLbl = new JLabel("Server");
+        JLabel hostLbl = new JLabel("Base host");
+        Dimension lblSize = new Dimension(70, hostLbl.getPreferredSize().height);
+        serverLbl.setPreferredSize(lblSize);
+        hostLbl.setPreferredSize(lblSize);
+
+        JPanel serverRow = new JPanel(new BorderLayout(8, 8));
+        serverRow.add(serverLbl, BorderLayout.WEST);
+        serverRow.add(serverCombo, BorderLayout.CENTER);
+
+        JPanel hostRow = new JPanel(new BorderLayout(8, 8));
+        hostRow.add(hostLbl, BorderLayout.WEST);
+        hostRow.add(hostField, BorderLayout.CENTER);
+
+        JPanel southStack = new JPanel(new BorderLayout(8, 8));
+        southStack.add(hostRow, BorderLayout.NORTH);
+        southStack.add(iterateAllServers, BorderLayout.SOUTH);
 
         JPanel north = new JPanel(new BorderLayout(8, 8));
-        JPanel left = new JPanel(new BorderLayout(8, 8));
-        left.add(new JLabel("Server"), BorderLayout.WEST);
-        left.add(serverCombo, BorderLayout.CENTER);
-        north.add(left, BorderLayout.CENTER);
-        north.add(iterateAllServers, BorderLayout.SOUTH);
+        north.add(serverRow, BorderLayout.NORTH);
+        north.add(southStack, BorderLayout.CENTER);
         add(north, BorderLayout.NORTH);
 
         varsModel = new VariablesModel();
@@ -71,13 +120,22 @@ public class ServersPanel extends JPanel {
         installEnumEditors(); // after model is ready
         reloadVariables();
         updateResolvedBadge();
+        hostField.setEnabled(context.anyServerRelative());
 
-        context.setServersUpdateListener(_void -> SwingUtilities.invokeLater(() -> {
-            loadServersIntoCombo();
-            selectInitialServerIndex();
-            installEnumEditors();
-            reloadVariables();
-            updateResolvedBadge();
+        context.addServersUpdateListener(_void -> SwingUtilities.invokeLater(() -> {
+            refreshing = true;
+            try {
+                loadServersIntoCombo();
+                selectInitialServerIndex();
+                iterateAllServers.setSelected(context.isIterateAcrossAllServers());
+                hostField.setText(context.getApiHost() == null ? "" : context.getApiHost());
+                hostField.setEnabled(context.anyServerRelative()); // Base host only matters for relative server URLs
+                installEnumEditors();
+                reloadVariables();
+                updateResolvedBadge();
+            } finally {
+                refreshing = false;
+            }
         }));
     }
 
@@ -89,41 +147,20 @@ public class ServersPanel extends JPanel {
     }
 
     private void updateResolvedBadge() {
-        String resolved = resolveSelectedServerUrl();
-        resolvedUrlBadge.setText("Server: " + (resolved == null || resolved.isBlank() ? "(none)" : resolved));
-        resolvedUrlBadge.setToolTipText(resolvedUrlBadge.getText());
-    }
-
-    private String resolveSelectedServerUrl() {
-        OpenAPI oa = context.getOpenAPI();
-        if (oa == null || oa.getServers() == null || oa.getServers().isEmpty()) return null;
-        int idx = Math.min(Math.max(context.getSelectedServerIndex(), 0), oa.getServers().size() - 1);
-        Server s = oa.getServers().get(idx);
-        String template = s.getUrl() == null ? "" : s.getUrl();
-        Map<String, String> values = effectiveVariableValues(s, idx);
-        String resolved = template;
-        for (Map.Entry<String, String> e : values.entrySet()) {
-            String token = "{" + e.getKey() + "}";
-            resolved = resolved.replace(token, e.getValue() == null ? "" : e.getValue());
+        int idx = serverCombo.getSelectedIndex();
+        String resolved = idx < 0 ? "" : context.resolveAbsoluteServerUrl(idx);
+        boolean unresolved = resolved != null && resolved.startsWith("/") && !resolved.startsWith("//");
+        String text;
+        if (resolved == null || resolved.isBlank()) {
+            text = "Server: (none)";
+        } else if (unresolved) {
+            text = "Server: " + resolved + "  — set Base host to send requests";
+        } else {
+            text = "Server: " + resolved;
         }
-        return resolved;
-    }
-
-    private Map<String, String> effectiveVariableValues(Server server, int serverIndex) {
-        Map<String, String> out = new HashMap<>();
-        Map<String, ServerVariable> specVars = server.getVariables();
-        if (specVars != null) {
-            for (var en : specVars.entrySet()) {
-                out.put(en.getKey(), Optional.ofNullable(en.getValue().getDefault()).orElse(""));
-            }
-        }
-        Map<String, String> overrides = context.getServerVariableOverrides(serverIndex);
-        for (var en : overrides.entrySet()) {
-            if (en.getValue() != null && !en.getValue().isBlank()) {
-                out.put(en.getKey(), en.getValue());
-            }
-        }
-        return out;
+        resolvedUrlBadge.setText(text);
+        resolvedUrlBadge.setForeground(unresolved ? Color.RED.darker() : null);
+        resolvedUrlBadge.setToolTipText(text);
     }
 
     private void loadServersIntoCombo() {
@@ -138,12 +175,15 @@ public class ServersPanel extends JPanel {
             return;
         }
 
-        for (Server s : servers) {
+        // Show the absolute target (relative spec URLs like "/api/v3" resolved against the spec host).
+        for (int i = 0; i < servers.size(); i++) {
+            Server s = servers.get(i);
+            String url = context.resolveAbsoluteServerUrl(i);
             String label;
             if (s.getDescription() != null && !s.getDescription().isBlank()) {
-                label = s.getDescription() + "  [" + s.getUrl() + "]";
+                label = s.getDescription() + "  [" + url + "]";
             } else {
-                label = s.getUrl();
+                label = url;
             }
             serverCombo.addItem(label);
         }

@@ -49,6 +49,11 @@ public class RequestFactory {
             return null;
         }
 
+        if (endpoint == null || endpoint.getOperation() == null || endpoint.getMethod() == null) {
+            context.api.logging().logToError("Cannot build request: endpoint has no operation or method.");
+            return null;
+        }
+
         // Resolve server URLs from context. For a single request build, first resolved URL.
         List<String> serverUrls = resolveServerBaseUrls();
         if (serverUrls.isEmpty()) {
@@ -59,18 +64,10 @@ public class RequestFactory {
 
         URL parsed;
         try {
-            if (serverUrl.startsWith("/")) {
-                String host = context.getApiHost();
-                if (host == null) {
-                    context.api.logging().logToError("Server URL is relative, but no host is defined. Please set one in the Specification tab.");
-                    return null;
-                }
-                parsed = new URL(new URL(host), serverUrl);
-            } else {
-                parsed = new URL(serverUrl);
-            }
+            parsed = toServerUrl(serverUrl);
         } catch (MalformedURLException e) {
-            context.api.logging().logToError("Invalid server URL in spec: " + serverUrl);
+            context.api.logging().logToError("Cannot resolve server URL '" + serverUrl + "': " + e.getMessage()
+                    + " — set the 'Base host' field in the Servers tab, or edit the Server URL there if it is a placeholder.");
             return null;
         }
 
@@ -240,13 +237,20 @@ public class RequestFactory {
         if (context.isIterateAcrossAllServers()) {
             List<String> out = new ArrayList<>();
             for (int i = 0; i < servers.size(); i++) {
-                out.add(resolveServerUrlWithVars(servers.get(i), i));
+                out.add(effectiveServerUrl(servers.get(i), i));
             }
             return out;
         } else {
             int idx = Math.min(Math.max(context.getSelectedServerIndex(), 0), servers.size() - 1);
-            return List.of(resolveServerUrlWithVars(servers.get(idx), idx));
+            return List.of(effectiveServerUrl(servers.get(idx), idx));
         }
+    }
+
+    /** A user-typed server-URL override (from the editable Server combo) wins over the spec server. */
+    private String effectiveServerUrl(Server server, int serverIndex) {
+        String override = context.getServerUrlOverride(serverIndex);
+        if (override != null && !override.isBlank()) return override;
+        return resolveServerUrlWithVars(server, serverIndex);
     }
 
     private String resolveServerUrlWithVars(Server server, int serverIndex) {
@@ -256,18 +260,42 @@ public class RequestFactory {
         Map<String, String> vals = new HashMap<>();
         if (server.getVariables() != null) {
             for (var e : server.getVariables().entrySet()) {
-                String def = (e.getValue() != null && e.getValue().getDefault() != null)
-                        ? e.getValue().getDefault()
-                        : "";
-                vals.put(e.getKey(), def);
+                if (e.getValue() != null && e.getValue().getDefault() != null) {
+                    vals.put(e.getKey(), e.getValue().getDefault());
+                }
             }
         }
-        vals.putAll(context.getServerVariableOverrides(serverIndex));
+        // Only apply non-blank overrides; a variable with no default/override stays as a "{name}" token
+        // so the URL fails loudly rather than silently substituting an empty host segment.
+        context.getServerVariableOverrides(serverIndex).forEach((k, v) -> {
+            if (v != null && !v.isBlank()) vals.put(k, v);
+        });
 
         for (var e : vals.entrySet()) {
             url = url.replace("{" + e.getKey() + "}", e.getValue() == null ? "" : e.getValue());
         }
         return url;
+    }
+
+    /**
+     * Build an absolute URL from a server URL that may be absolute, scheme-relative ("//host/path"),
+     * or path-relative ("/base"). Path-relative URLs resolve against the configured Base host.
+     */
+    private URL toServerUrl(String serverUrl) throws MalformedURLException {
+        if (serverUrl == null) throw new MalformedURLException("null server URL");
+        if (serverUrl.startsWith("//")) { // scheme-relative: adopt Base host's scheme, else https
+            String host = context.getApiHost();
+            String scheme = (host != null && host.contains("://")) ? host.substring(0, host.indexOf("://")) : "https";
+            return new URL(scheme + ":" + serverUrl);
+        }
+        if (serverUrl.startsWith("/")) { // path-relative: needs a Base host
+            String host = context.getApiHost();
+            if (host == null || host.isBlank()) {
+                throw new MalformedURLException("relative server URL with no Base host: " + serverUrl);
+            }
+            return new URL(new URL(host), serverUrl);
+        }
+        return new URL(serverUrl);
     }
 
     // path, header, cookie, query helpers
@@ -390,7 +418,8 @@ public class RequestFactory {
             }
 
             if (value != null && !value.isEmpty()) {
-                newRequest = newRequest.withAddedParameters(urlParameter(specParam.getName(), value));
+                newRequest = newRequest.withAddedParameters(
+                        urlParameter(encodePathSegment(specParam.getName()), encodePathSegment(value)));
             }
         }
         return newRequest;
@@ -420,7 +449,7 @@ public class RequestFactory {
 
                     if (scheme.getType() == SecurityScheme.Type.APIKEY && scheme.getIn() == SecurityScheme.In.QUERY) {
                         String name = scheme.getName() != null ? scheme.getName() : "api_key";
-                        out = out.withAddedParameters(urlParameter(name, token));
+                        out = out.withAddedParameters(urlParameter(encodePathSegment(name), encodePathSegment(token)));
                         addedSomething = true;
                     }
                 }
@@ -443,7 +472,7 @@ public class RequestFactory {
                     if (token == null || token.isBlank()) continue;
 
                     String name = scheme.getName() != null ? scheme.getName() : "api_key";
-                    out = out.withAddedParameters(urlParameter(name, token));
+                    out = out.withAddedParameters(urlParameter(encodePathSegment(name), encodePathSegment(token)));
                 }
             }
         }
@@ -510,6 +539,8 @@ public class RequestFactory {
 
             String token = context.getAuthToken(schemeName);
             if (token == null || token.isBlank()) continue;
+
+            if (scheme.getType() == null) continue; // unknown scheme type: nothing to inject (avoids NPE in switch)
 
             switch (scheme.getType()) {
                 case APIKEY -> {
@@ -615,20 +646,6 @@ public class RequestFactory {
             reqs = context.getOpenAPI().getSecurity();
         }
         return reqs;
-    }
-
-    // legacy method
-    private String resolveServerUrl(Server server) {
-        String url = server.getUrl();
-        if (server.getVariables() != null && !server.getVariables().isEmpty()) {
-            for (Map.Entry<String, io.swagger.v3.oas.models.servers.ServerVariable> e : server.getVariables().entrySet()) {
-                String var = e.getKey();
-                io.swagger.v3.oas.models.servers.ServerVariable sv = e.getValue();
-                String def = sv != null && sv.getDefault() != null ? sv.getDefault() : "";
-                url = url.replace("{" + var + "}", def);
-            }
-        }
-        return url;
     }
 
     // body building and synthesis
@@ -803,9 +820,9 @@ public class RequestFactory {
     private Schema<?> deref(Schema<?> s) {
         if (s == null || s.get$ref() == null) return s;
         String name = s.get$ref().substring(s.get$ref().lastIndexOf('/') + 1);
-        return context.getOpenAPI().getComponents() != null
-                ? context.getOpenAPI().getComponents().getSchemas().getOrDefault(name, s)
-                : s;
+        var components = context.getOpenAPI().getComponents();
+        if (components == null || components.getSchemas() == null) return s;
+        return components.getSchemas().getOrDefault(name, s);
     }
 
     private RequestBody derefRequestBody(RequestBody rb) {
@@ -1111,6 +1128,11 @@ public class RequestFactory {
                     top = "[]";
                 }
                 String kind = types.get(top);
+                if (kind == null) {
+                    // The schema-derived type map can be incomplete (additionalProperties,
+                    // composition, example-only keys). Fall back to the actual parsed body.
+                    kind = inferKindFromRoot(root, top);
+                }
                 if (kind == null) continue;
 
                 Object val = parseScalarOrJson(p.getValue());
@@ -1141,6 +1163,20 @@ public class RequestFactory {
         } catch (Throwable t) {
             return json;
         }
+    }
+
+    /** Infer a top-level key's kind (object/array/scalar) from the actual parsed body when the schema map omits it. */
+    private String inferKindFromRoot(Object root, String top) {
+        if ("[]".equals(top)) {
+            return (root instanceof java.util.List) ? "array" : null;
+        }
+        if (!(root instanceof java.util.Map)) return null;
+        java.util.Map<?, ?> map = (java.util.Map<?, ?>) root;
+        if (!map.containsKey(top)) return null;
+        Object node = map.get(top);
+        if (node instanceof java.util.Map) return "object";
+        if (node instanceof java.util.List) return "array";
+        return "string"; // scalar leaf
     }
 
     private void applyBodyOverridesToMap(Map<String, Object> map, Map<String, Parameter> store, String prefix) {
@@ -1372,9 +1408,7 @@ public class RequestFactory {
 
         String originalBasePath = "";
         try {
-            URL first = bases.get(0).startsWith("/")
-                    ? new URL(new URL(Objects.requireNonNull(context.getApiHost())), bases.get(0))
-                    : new URL(bases.get(0));
+            URL first = toServerUrl(bases.get(0));
             originalBasePath = first.getPath();
             if ("/".equals(originalBasePath)) originalBasePath = "";
             if (originalBasePath.endsWith("/")) {
@@ -1392,9 +1426,7 @@ public class RequestFactory {
 
         for (String base : bases) {
             try {
-                URL u = base.startsWith("/")
-                        ? new URL(new URL(Objects.requireNonNull(context.getApiHost())), base)
-                        : new URL(base);
+                URL u = toServerUrl(base);
 
                 int port = u.getPort() == -1 ? u.getDefaultPort() : u.getPort();
                 boolean secure = "https".equalsIgnoreCase(u.getProtocol());
@@ -1427,7 +1459,9 @@ public class RequestFactory {
                         .withBody(baseReq.body().toString());
 
                 out.add(copy);
-            } catch (Throwable ignored) {
+            } catch (Throwable t) {
+                context.api.logging().logToError(
+                        "Skipping server during multi-server send (could not resolve '" + base + "'): " + t.getMessage());
             }
         }
         return out;

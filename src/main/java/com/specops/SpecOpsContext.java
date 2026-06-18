@@ -6,9 +6,11 @@ import com.specops.domain.Endpoint;
 import com.specops.domain.Parameter;
 import com.specops.domain.rules.HeaderRule;
 import io.swagger.v3.oas.models.OpenAPI;
+import io.swagger.v3.oas.models.servers.Server;
 
 import java.util.ArrayList;
 import java.util.Collections;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Locale;
 import java.util.Map;
@@ -28,6 +30,7 @@ public class SpecOpsContext {
     private final List<AttackResult> attackResults;
     private final List<HeaderRule> headerRules;
     private final Map<Integer, Map<String, String>> serverVariableOverrides;
+    private final Map<Integer, String> serverUrlOverrides = new ConcurrentHashMap<>();
     private final Map<String, String> authTokens;
 
     private OpenAPI openAPI;
@@ -37,11 +40,13 @@ public class SpecOpsContext {
     private volatile int selectedServerIndex = 0;
     private volatile boolean iterateAcrossAllServers = false;
 
-    private Consumer<Void> endpointsUpdateListener;
-    private Consumer<Void> parametersUpdateListener;
-    private Consumer<Void> serversUpdateListener;
-    private Runnable bindingsUpdateListener; // Runnable by design (no arg needed)
-    private Consumer<AttackResult> attackResultListener;
+    // Listener registries: each notifier supports multiple subscribers so that
+    // independent tabs can react to the same event without overwriting each other.
+    private final List<Consumer<Void>> endpointsUpdateListeners = new CopyOnWriteArrayList<>();
+    private final List<Consumer<Void>> parametersUpdateListeners = new CopyOnWriteArrayList<>();
+    private final List<Consumer<Void>> serversUpdateListeners = new CopyOnWriteArrayList<>();
+    private final List<Runnable> bindingsUpdateListeners = new CopyOnWriteArrayList<>(); // Runnable by design (no arg needed)
+    private final List<Consumer<AttackResult>> attackResultListeners = new CopyOnWriteArrayList<>();
 
     public SpecOpsContext(MontoyaApi api) {
         this.api = api;
@@ -113,6 +118,7 @@ public class SpecOpsContext {
 
         this.selectedServerIndex = 0;
         this.serverVariableOverrides.clear();
+        this.serverUrlOverrides.clear();
         this.iterateAcrossAllServers = false;
 
         notifyEndpointsChanged();
@@ -218,62 +224,86 @@ public class SpecOpsContext {
         synchronized (attackResults) {
             this.attackResults.add(result);
         }
-        if (attackResultListener != null) {
-            attackResultListener.accept(result);
+        for (Consumer<AttackResult> listener : attackResultListeners) {
+            dispatch(() -> listener.accept(result));
         }
     }
 
-    public void setAttackResultListener(Consumer<AttackResult> listener) {
-        this.attackResultListener = listener;
+    /** Register a listener for new attack results. Multiple listeners are supported. */
+    public void addAttackResultListener(Consumer<AttackResult> listener) {
+        if (listener != null) attackResultListeners.add(listener);
     }
 
-    public void setEndpointsUpdateListener(Consumer<Void> listener) {
-        this.endpointsUpdateListener = listener;
+    /** Register a listener for endpoint-model changes. Multiple listeners are supported. */
+    public void addEndpointsUpdateListener(Consumer<Void> listener) {
+        if (listener != null) endpointsUpdateListeners.add(listener);
     }
 
-    public void setParametersUpdateListener(Consumer<Void> listener) {
-        this.parametersUpdateListener = listener;
+    /** Register a listener for parameter-store changes. Multiple listeners are supported. */
+    public void addParametersUpdateListener(Consumer<Void> listener) {
+        if (listener != null) parametersUpdateListeners.add(listener);
     }
 
-    public void setServersUpdateListener(Consumer<Void> listener) {
-        this.serversUpdateListener = listener;
+    /** Register a listener for server/auth changes. Multiple listeners are supported. */
+    public void addServersUpdateListener(Consumer<Void> listener) {
+        if (listener != null) serversUpdateListeners.add(listener);
     }
 
-    /** Bindings/stats panel; Runnable is fine since there’s no payload. */
-    public void setBindingsUpdateListener(Runnable r) {
-        this.bindingsUpdateListener = r;
+    /** Bindings/stats panel; Runnable is fine since there’s no payload. Multiple listeners are supported. */
+    public void addBindingsUpdateListener(Runnable r) {
+        if (r != null) bindingsUpdateListeners.add(r);
     }
 
     /**
-     * Invokes the endpoints listener on the calling thread.
+     * Invokes every endpoints listener on the calling thread.
      * Swing listeners must dispatch UI mutations to the EDT.
      */
     public void notifyEndpointsChanged() {
-        if (endpointsUpdateListener != null) endpointsUpdateListener.accept(null);
+        for (Consumer<Void> listener : endpointsUpdateListeners) {
+            dispatch(() -> listener.accept(null));
+        }
     }
 
     /**
-     * Invokes the parameters listener on the calling thread.
+     * Invokes every parameters listener on the calling thread.
      * Swing listeners must dispatch UI mutations to the EDT.
      */
     public void notifyParametersChanged() {
-        if (parametersUpdateListener != null) parametersUpdateListener.accept(null);
+        for (Consumer<Void> listener : parametersUpdateListeners) {
+            dispatch(() -> listener.accept(null));
+        }
     }
 
     /**
-     * Invokes the server listener on the calling thread.
+     * Invokes every server listener on the calling thread.
      * Swing listeners must dispatch UI mutations to the EDT.
      */
     public void notifyServersChanged() {
-        if (serversUpdateListener != null) serversUpdateListener.accept(null);
+        for (Consumer<Void> listener : serversUpdateListeners) {
+            dispatch(() -> listener.accept(null));
+        }
     }
 
     /**
-     * Invokes the bindings listener on the calling thread.
+     * Invokes every bindings listener on the calling thread.
      * Swing listeners must dispatch UI mutations to the EDT.
      */
     public void notifyBindingsChanged() {
-        if (bindingsUpdateListener != null) bindingsUpdateListener.run();
+        for (Runnable listener : bindingsUpdateListeners) {
+            dispatch(listener);
+        }
+    }
+
+    /**
+     * Runs a single listener callback, isolating failures so one misbehaving
+     * subscriber cannot prevent the others from being notified.
+     */
+    private void dispatch(Runnable action) {
+        try {
+            action.run();
+        } catch (Exception ex) {
+            api.logging().logToError("SpecOps listener notification failed: " + ex.getMessage());
+        }
     }
 
     public String getApiHost() { return apiHost; }
@@ -308,6 +338,94 @@ public class SpecOpsContext {
     public void setIterateAcrossAllServers(boolean iterateAcrossAllServers) {
         this.iterateAcrossAllServers = iterateAcrossAllServers;
         notifyServersChanged();
+    }
+
+    /**
+     * Human-readable target for the Endpoints Workbench: the resolved selected-server URL,
+     * or an all-servers summary when iterate mode is on.
+     */
+    public String getServerTargetLabel() {
+        if (openAPI == null || openAPI.getServers() == null || openAPI.getServers().isEmpty()) {
+            return "(no server)";
+        }
+        List<Server> servers = openAPI.getServers();
+        if (iterateAcrossAllServers) {
+            return "All servers (" + servers.size() + ")";
+        }
+        return resolveAbsoluteServerUrl(selectedServerIndex);
+    }
+
+    /**
+     * Absolute target URL for a server index: variables resolved, and a relative server URL
+     * (e.g. "/api/v3") resolved against the host the spec was loaded from.
+     */
+    public String resolveAbsoluteServerUrl(int serverIndex) {
+        if (openAPI == null || openAPI.getServers() == null || openAPI.getServers().isEmpty()) return "";
+        List<Server> servers = openAPI.getServers();
+        int idx = Math.min(Math.max(serverIndex, 0), servers.size() - 1);
+        String override = serverUrlOverrides.get(idx);
+        if (override != null && !override.isBlank()) return absolutize(override);
+        return absolutize(resolveServerUrl(servers.get(idx), idx));
+    }
+
+    /** A user-typed full server URL that overrides the spec's server (e.g. to replace a placeholder host). */
+    public String getServerUrlOverride(int serverIndex) { return serverUrlOverrides.get(serverIndex); }
+    public void setServerUrlOverride(int serverIndex, String url) {
+        if (url == null || url.isBlank()) {
+            serverUrlOverrides.remove(serverIndex);
+        } else {
+            serverUrlOverrides.put(serverIndex, url.trim());
+        }
+        notifyServersChanged();
+    }
+
+    /** True if any server (after overrides + variables) is still a path-relative URL needing a Base host. */
+    public boolean anyServerRelative() {
+        if (openAPI == null || openAPI.getServers() == null) return false;
+        List<Server> servers = openAPI.getServers();
+        for (int i = 0; i < servers.size(); i++) {
+            String override = serverUrlOverrides.get(i);
+            String u = (override != null && !override.isBlank()) ? override : resolveServerUrl(servers.get(i), i);
+            if (u != null && u.startsWith("/") && !u.startsWith("//")) return true;
+        }
+        return false;
+    }
+
+    /** Make a server URL absolute for display: prepend the Base host to a path-relative URL, add a scheme to a scheme-relative one. */
+    private String absolutize(String url) {
+        if (url == null || url.isEmpty()) return "";
+        if (url.startsWith("//")) { // scheme-relative, e.g. "//host/path"
+            return schemeOf(apiHost) + ":" + url;
+        }
+        if (url.startsWith("/") && apiHost != null && !apiHost.isBlank()) {
+            String host = apiHost.endsWith("/") ? apiHost.substring(0, apiHost.length() - 1) : apiHost;
+            return host + url;
+        }
+        return url;
+    }
+
+    private static String schemeOf(String hostUrl) {
+        if (hostUrl != null && hostUrl.contains("://")) return hostUrl.substring(0, hostUrl.indexOf("://"));
+        return "https";
+    }
+
+    /** Resolve a server URL template against its variable defaults and overrides; leave unresolved {tokens} in place. */
+    private String resolveServerUrl(Server server, int serverIndex) {
+        if (server == null || server.getUrl() == null) return "";
+        String url = server.getUrl();
+        Map<String, String> values = new HashMap<>();
+        if (server.getVariables() != null) {
+            server.getVariables().forEach((k, v) -> {
+                if (v != null && v.getDefault() != null) values.put(k, v.getDefault());
+            });
+        }
+        getServerVariableOverrides(serverIndex).forEach((k, v) -> {
+            if (v != null && !v.isBlank()) values.put(k, v);
+        });
+        for (Map.Entry<String, String> e : values.entrySet()) {
+            url = url.replace("{" + e.getKey() + "}", e.getValue() == null ? "" : e.getValue());
+        }
+        return url; // any variable with no default/override stays as a literal "{name}" token
     }
 
     public void setAuthToken(String schemeName, String value) {

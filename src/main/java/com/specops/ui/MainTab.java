@@ -11,6 +11,8 @@ import java.awt.*;
  */
 public class MainTab extends JPanel {
 
+    private final EndpointsTab endpointsTab;
+
     public MainTab(SpecOpsContext context) {
         setLayout(new BorderLayout());
         JTabbedPane tabbedPane = new JTabbedPane();
@@ -18,7 +20,7 @@ public class MainTab extends JPanel {
         SpecificationTab specTab = new SpecificationTab(context, tabbedPane);
         ParameterStoreTab paramsTab = new ParameterStoreTab(context);
         CustomHeadersTab customHeadersTab = new CustomHeadersTab(context);
-        EndpointsTab endpointsTab = new EndpointsTab(context, tabbedPane);
+        this.endpointsTab = new EndpointsTab(context, tabbedPane);
         ResultsTab resultsTab = new ResultsTab(context);
         ServersPanel serversPanel = new ServersPanel(context);
         AuthProfilesTab authTab = new AuthProfilesTab(context);
@@ -36,9 +38,14 @@ public class MainTab extends JPanel {
         tabbedPane.addTab("5. Custom Headers", customHeadersTab);
         tabbedPane.addTab("6. Endpoints Workbench", endpointsTab);
         tabbedPane.addTab("7. Attack Results", resultsTab);
-        tabbedPane.addTab("About", new AboutMeTab("SpecOps", "1.3.1"));
+        tabbedPane.addTab("About", new AboutMeTab("SpecOps", "1.4.0"));
 
 
         add(tabbedPane, BorderLayout.CENTER);
+    }
+
+    /** Stop background work owned by the tabs; called from the extension unload handler. */
+    public void shutdown() {
+        endpointsTab.shutdown();
     }
 }

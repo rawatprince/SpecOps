@@ -1,5 +1,6 @@
 package com.specops.domain;
 
+import burp.api.montoya.http.HttpService;
 import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.http.message.responses.HttpResponse;
 
@@ -43,5 +44,23 @@ public class AttackResult {
 
     public int getResponseLength() {
         return response != null ? response.body().length() : 0;
+    }
+
+    /** The server this request targeted, e.g. "https://api.example.com" (port shown only when non-default). */
+    public String getTarget() {
+        return describeTarget(request);
+    }
+
+    /** Render an HttpRequest's destination as scheme://host[:port], omitting the default port. */
+    public static String describeTarget(HttpRequest request) {
+        if (request == null) return "";
+        HttpService service = request.httpService();
+        if (service == null) return "";
+        String scheme = service.secure() ? "https" : "http";
+        String target = scheme + "://" + service.host();
+        if ((service.secure() && service.port() != 443) || (!service.secure() && service.port() != 80)) {
+            target += ":" + service.port();
+        }
+        return target;
     }
 }

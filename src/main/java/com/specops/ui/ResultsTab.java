@@ -1,5 +1,6 @@
 package com.specops.ui;
 
+import burp.api.montoya.http.message.requests.HttpRequest;
 import burp.api.montoya.ui.UserInterface;
 import burp.api.montoya.ui.editor.EditorOptions;
 import burp.api.montoya.ui.editor.HttpRequestEditor;
@@ -16,10 +17,13 @@ import javax.swing.event.DocumentEvent;
 import javax.swing.event.DocumentListener;
 import javax.swing.table.TableRowSorter;
 import java.awt.*;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.io.File;
 import java.nio.file.Path;
+import java.util.ArrayList;
 import java.util.List;
 import java.util.Locale;
 import java.util.concurrent.ExecutionException;
@@ -56,9 +60,10 @@ public class ResultsTab extends JPanel {
 
         resultsTable.getColumnModel().getColumn(0).setPreferredWidth(100); // Timestamp
         resultsTable.getColumnModel().getColumn(1).setPreferredWidth(60);  // Method
-        resultsTable.getColumnModel().getColumn(2).setPreferredWidth(350); // Path
-        resultsTable.getColumnModel().getColumn(3).setPreferredWidth(100); // Status Code
-        resultsTable.getColumnModel().getColumn(4).setPreferredWidth(120); // Length
+        resultsTable.getColumnModel().getColumn(2).setPreferredWidth(300); // Path
+        resultsTable.getColumnModel().getColumn(3).setPreferredWidth(220); // Server
+        resultsTable.getColumnModel().getColumn(4).setPreferredWidth(100); // Status Code
+        resultsTable.getColumnModel().getColumn(5).setPreferredWidth(120); // Length
 
         addRightClickMenu();
 
@@ -100,7 +105,7 @@ public class ResultsTab extends JPanel {
         });
 
         // When new results arrive, refresh table and keep preview in sync if selected row changed
-        context.setAttackResultListener(result -> runOnEdt(() -> {
+        context.addAttackResultListener(result -> runOnEdt(() -> {
             tableModel.fireTableDataChanged();
             // If one row is selected, reapply preview so it stays fresh
             if (resultsTable.getSelectedRowCount() == 1) {
@@ -204,20 +209,45 @@ public class ResultsTab extends JPanel {
         sendToRepeaterItem.addActionListener(e -> sendSelectedToRepeater());
         popupMenu.add(sendToRepeaterItem);
 
+        popupMenu.addSeparator();
+
+        JMenuItem selectAllItem = new JMenuItem("Select All");
+        selectAllItem.addActionListener(e -> resultsTable.selectAll());
+        popupMenu.add(selectAllItem);
+
+        // Cross-platform popup trigger. On macOS the trigger can arrive on press OR release,
+        // and a Control-click is reported as BUTTON1 (so isRightMouseButton would miss it).
         resultsTable.addMouseListener(new MouseAdapter() {
             @Override
-            public void mousePressed(MouseEvent e) {
-                if (SwingUtilities.isRightMouseButton(e)) {
-                    int row = resultsTable.rowAtPoint(e.getPoint());
-                    if (row >= 0 && !resultsTable.isRowSelected(row)) {
-                        resultsTable.setRowSelectionInterval(row, row);
-                    }
-                    if (resultsTable.getSelectedRowCount() > 0) {
-                        popupMenu.show(e.getComponent(), e.getX(), e.getY());
-                    }
+            public void mousePressed(MouseEvent e) { maybeShowPopup(e); }
+
+            @Override
+            public void mouseReleased(MouseEvent e) { maybeShowPopup(e); }
+
+            private void maybeShowPopup(MouseEvent e) {
+                if (!e.isPopupTrigger()) return;
+                int row = resultsTable.rowAtPoint(e.getPoint());
+                if (row >= 0 && !resultsTable.isRowSelected(row)) {
+                    resultsTable.setRowSelectionInterval(row, row);
                 }
+                popupMenu.show(e.getComponent(), e.getX(), e.getY());
             }
         });
+
+        // Select-all from the keyboard on every platform (Cmd+A on macOS, Ctrl+A elsewhere).
+        InputMap im = resultsTable.getInputMap(JComponent.WHEN_FOCUSED);
+        im.put(KeyStroke.getKeyStroke(KeyEvent.VK_A, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()), "selectAll");
+        im.put(KeyStroke.getKeyStroke(KeyEvent.VK_A, InputEvent.CTRL_DOWN_MASK), "selectAll");
+    }
+
+    private List<AttackResult> getSelectedResults() {
+        List<AttackResult> out = new ArrayList<>();
+        for (int viewRow : resultsTable.getSelectedRows()) {
+            int modelRow = resultsTable.convertRowIndexToModel(viewRow);
+            AttackResult r = context.getAttackResultAt(modelRow);
+            if (r != null) out.add(r);
+        }
+        return out;
     }
 
     private void viewSelectedRequestResponse() {
@@ -246,11 +276,18 @@ public class ResultsTab extends JPanel {
     }
 
     private void sendSelectedToRepeater() {
-        AttackResult result = getSelectedResult();
-        if (result == null) return;
-
-        String tabName = result.getEndpoint().getMethod() + " " + result.getEndpoint().getPath();
-        context.api.repeater().sendToRepeater(result.getRequest(), tabName);
+        List<AttackResult> results = getSelectedResults();
+        boolean multiple = results.size() > 1;
+        for (AttackResult result : results) {
+            HttpRequest request = result.getRequest();
+            if (request == null) continue;
+            String tabName = result.getEndpoint().getMethod() + " " + result.getEndpoint().getPath();
+            if (multiple) {
+                // results may come from different servers (iterate mode) — show the target to tell them apart
+                tabName += " @ " + AttackResult.describeTarget(request);
+            }
+            context.api.repeater().sendToRepeater(request, tabName);
+        }
     }
 
     private void exportResults(ExportFormat format) {
