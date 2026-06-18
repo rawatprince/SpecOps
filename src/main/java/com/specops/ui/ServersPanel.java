@@ -28,6 +28,14 @@ public class ServersPanel extends JPanel {
     private final JCheckBox iterateAllServers;
     private final JLabel resolvedUrlBadge = new JLabel("Server: (none)");
 
+    /**
+     * EDT-only guard. Set while we are programmatically repopulating our own
+     * widgets in response to a context notification, so the widgets' action
+     * listeners don't write the change back into the context and trigger an
+     * endless notify -> refresh -> notify loop.
+     */
+    private boolean refreshing = false;
+
     public ServersPanel(SpecOpsContext context) {
         super(new BorderLayout(8, 8));
         this.context = context;
@@ -35,6 +43,7 @@ public class ServersPanel extends JPanel {
         // Top row: server selector and iterate checkbox
         serverCombo = new JComboBox<>();
         serverCombo.addActionListener(e -> {
+            if (refreshing) return; // programmatic repopulation, not a user action
             int idx = serverCombo.getSelectedIndex();
             if (idx >= 0) {
                 context.setSelectedServerIndex(idx);
@@ -45,9 +54,10 @@ public class ServersPanel extends JPanel {
 
         iterateAllServers = new JCheckBox("Iterate across all servers when sending");
         iterateAllServers.setSelected(context.isIterateAcrossAllServers());
-        iterateAllServers.addActionListener(e ->
-                context.setIterateAcrossAllServers(iterateAllServers.isSelected())
-        );
+        iterateAllServers.addActionListener(e -> {
+            if (refreshing) return;
+            context.setIterateAcrossAllServers(iterateAllServers.isSelected());
+        });
 
         JPanel north = new JPanel(new BorderLayout(8, 8));
         JPanel left = new JPanel(new BorderLayout(8, 8));
@@ -73,11 +83,17 @@ public class ServersPanel extends JPanel {
         updateResolvedBadge();
 
         context.addServersUpdateListener(_void -> SwingUtilities.invokeLater(() -> {
-            loadServersIntoCombo();
-            selectInitialServerIndex();
-            installEnumEditors();
-            reloadVariables();
-            updateResolvedBadge();
+            refreshing = true;
+            try {
+                loadServersIntoCombo();
+                selectInitialServerIndex();
+                iterateAllServers.setSelected(context.isIterateAcrossAllServers());
+                installEnumEditors();
+                reloadVariables();
+                updateResolvedBadge();
+            } finally {
+                refreshing = false;
+            }
         }));
     }
 
