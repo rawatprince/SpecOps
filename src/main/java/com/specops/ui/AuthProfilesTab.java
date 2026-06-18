@@ -70,7 +70,7 @@ public class AuthProfilesTab extends JPanel {
         reloadFromSpec();
 
         // When spec or server settings change, refresh our view
-        context.setServersUpdateListener(v -> SwingUtilities.invokeLater(this::reloadFromSpec));
+        context.addServersUpdateListener(v -> SwingUtilities.invokeLater(this::reloadFromSpec));
     }
 
     private void reloadFromSpec() {

@@ -100,7 +100,7 @@ public class ResultsTab extends JPanel {
         });
 
         // When new results arrive, refresh table and keep preview in sync if selected row changed
-        context.setAttackResultListener(result -> runOnEdt(() -> {
+        context.addAttackResultListener(result -> runOnEdt(() -> {
             tableModel.fireTableDataChanged();
             // If one row is selected, reapply preview so it stays fresh
             if (resultsTable.getSelectedRowCount() == 1) {

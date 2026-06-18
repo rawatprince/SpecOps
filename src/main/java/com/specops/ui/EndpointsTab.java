@@ -136,14 +136,14 @@ public class EndpointsTab extends JPanel {
         add(mainSplitPane, BorderLayout.CENTER);
 
         // Refresh table when endpoints or parameters change
-        context.setEndpointsUpdateListener(v -> runOnEdt(this::refreshData));
-        context.setParametersUpdateListener(v -> runOnEdt(() -> {
+        context.addEndpointsUpdateListener(v -> runOnEdt(this::refreshData));
+        context.addParametersUpdateListener(v -> runOnEdt(() -> {
             tableModel.recalculateBindingStatus();
             tableModel.fireTableDataChanged();
             updatePreviewPanels();
             updateCountLabel();
         }));
-        context.setBindingsUpdateListener(() -> runOnEdt(() -> {
+        context.addBindingsUpdateListener(() -> runOnEdt(() -> {
             tableModel.recalculateBindingStatus();
             tableModel.fireTableDataChanged();
             updateCountLabel();

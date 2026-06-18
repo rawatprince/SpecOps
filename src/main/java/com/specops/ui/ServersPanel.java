@@ -72,7 +72,7 @@ public class ServersPanel extends JPanel {
         reloadVariables();
         updateResolvedBadge();
 
-        context.setServersUpdateListener(_void -> SwingUtilities.invokeLater(() -> {
+        context.addServersUpdateListener(_void -> SwingUtilities.invokeLater(() -> {
             loadServersIntoCombo();
             selectInitialServerIndex();
             installEnumEditors();

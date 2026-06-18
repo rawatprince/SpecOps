@@ -37,11 +37,13 @@ public class SpecOpsContext {
     private volatile int selectedServerIndex = 0;
     private volatile boolean iterateAcrossAllServers = false;
 
-    private Consumer<Void> endpointsUpdateListener;
-    private Consumer<Void> parametersUpdateListener;
-    private Consumer<Void> serversUpdateListener;
-    private Runnable bindingsUpdateListener; // Runnable by design (no arg needed)
-    private Consumer<AttackResult> attackResultListener;
+    // Listener registries: each notifier supports multiple subscribers so that
+    // independent tabs can react to the same event without overwriting each other.
+    private final List<Consumer<Void>> endpointsUpdateListeners = new CopyOnWriteArrayList<>();
+    private final List<Consumer<Void>> parametersUpdateListeners = new CopyOnWriteArrayList<>();
+    private final List<Consumer<Void>> serversUpdateListeners = new CopyOnWriteArrayList<>();
+    private final List<Runnable> bindingsUpdateListeners = new CopyOnWriteArrayList<>(); // Runnable by design (no arg needed)
+    private final List<Consumer<AttackResult>> attackResultListeners = new CopyOnWriteArrayList<>();
 
     public SpecOpsContext(MontoyaApi api) {
         this.api = api;
@@ -218,62 +220,86 @@ public class SpecOpsContext {
         synchronized (attackResults) {
             this.attackResults.add(result);
         }
-        if (attackResultListener != null) {
-            attackResultListener.accept(result);
+        for (Consumer<AttackResult> listener : attackResultListeners) {
+            dispatch(() -> listener.accept(result));
         }
     }
 
-    public void setAttackResultListener(Consumer<AttackResult> listener) {
-        this.attackResultListener = listener;
+    /** Register a listener for new attack results. Multiple listeners are supported. */
+    public void addAttackResultListener(Consumer<AttackResult> listener) {
+        if (listener != null) attackResultListeners.add(listener);
     }
 
-    public void setEndpointsUpdateListener(Consumer<Void> listener) {
-        this.endpointsUpdateListener = listener;
+    /** Register a listener for endpoint-model changes. Multiple listeners are supported. */
+    public void addEndpointsUpdateListener(Consumer<Void> listener) {
+        if (listener != null) endpointsUpdateListeners.add(listener);
     }
 
-    public void setParametersUpdateListener(Consumer<Void> listener) {
-        this.parametersUpdateListener = listener;
+    /** Register a listener for parameter-store changes. Multiple listeners are supported. */
+    public void addParametersUpdateListener(Consumer<Void> listener) {
+        if (listener != null) parametersUpdateListeners.add(listener);
     }
 
-    public void setServersUpdateListener(Consumer<Void> listener) {
-        this.serversUpdateListener = listener;
+    /** Register a listener for server/auth changes. Multiple listeners are supported. */
+    public void addServersUpdateListener(Consumer<Void> listener) {
+        if (listener != null) serversUpdateListeners.add(listener);
     }
 
-    /** Bindings/stats panel; Runnable is fine since there’s no payload. */
-    public void setBindingsUpdateListener(Runnable r) {
-        this.bindingsUpdateListener = r;
+    /** Bindings/stats panel; Runnable is fine since there’s no payload. Multiple listeners are supported. */
+    public void addBindingsUpdateListener(Runnable r) {
+        if (r != null) bindingsUpdateListeners.add(r);
     }
 
     /**
-     * Invokes the endpoints listener on the calling thread.
+     * Invokes every endpoints listener on the calling thread.
      * Swing listeners must dispatch UI mutations to the EDT.
      */
     public void notifyEndpointsChanged() {
-        if (endpointsUpdateListener != null) endpointsUpdateListener.accept(null);
+        for (Consumer<Void> listener : endpointsUpdateListeners) {
+            dispatch(() -> listener.accept(null));
+        }
     }
 
     /**
-     * Invokes the parameters listener on the calling thread.
+     * Invokes every parameters listener on the calling thread.
      * Swing listeners must dispatch UI mutations to the EDT.
      */
     public void notifyParametersChanged() {
-        if (parametersUpdateListener != null) parametersUpdateListener.accept(null);
+        for (Consumer<Void> listener : parametersUpdateListeners) {
+            dispatch(() -> listener.accept(null));
+        }
     }
 
     /**
-     * Invokes the server listener on the calling thread.
+     * Invokes every server listener on the calling thread.
      * Swing listeners must dispatch UI mutations to the EDT.
      */
     public void notifyServersChanged() {
-        if (serversUpdateListener != null) serversUpdateListener.accept(null);
+        for (Consumer<Void> listener : serversUpdateListeners) {
+            dispatch(() -> listener.accept(null));
+        }
     }
 
     /**
-     * Invokes the bindings listener on the calling thread.
+     * Invokes every bindings listener on the calling thread.
      * Swing listeners must dispatch UI mutations to the EDT.
      */
     public void notifyBindingsChanged() {
-        if (bindingsUpdateListener != null) bindingsUpdateListener.run();
+        for (Runnable listener : bindingsUpdateListeners) {
+            dispatch(listener);
+        }
+    }
+
+    /**
+     * Runs a single listener callback, isolating failures so one misbehaving
+     * subscriber cannot prevent the others from being notified.
+     */
+    private void dispatch(Runnable action) {
+        try {
+            action.run();
+        } catch (Exception ex) {
+            api.logging().logToError("SpecOps listener notification failed: " + ex.getMessage());
+        }
     }
 
     public String getApiHost() { return apiHost; }

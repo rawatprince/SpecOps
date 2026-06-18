@@ -174,7 +174,7 @@ public class ParameterStoreTab extends JPanel {
         setupFilterListener();
 
         // Refresh UI when parameter store changes
-        context.setParametersUpdateListener(v ->
+        context.addParametersUpdateListener(v ->
                 javax.swing.SwingUtilities.invokeLater(this::refreshData));
     }
 
