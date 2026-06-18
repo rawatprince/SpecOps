@@ -188,7 +188,9 @@ public class EndpointsTab extends JPanel {
         int[] selectedViewRows = endpointsTable.getSelectedRows();
         if (selectedViewRows.length == 1) {
             int modelRow = endpointsTable.convertRowIndexToModel(selectedViewRows[0]);
-            List<Endpoint> endpoints = context.getEndpoints();
+            // Snapshot once so the bounds check and get() are consistent even if a
+            // background parse worker swaps the shared list (resetModel: clear()+addAll()).
+            List<Endpoint> endpoints = new ArrayList<>(context.getEndpoints());
             if (modelRow < 0 || modelRow >= endpoints.size()) {
                 requestViewer.setRequest(null);
                 return;
@@ -225,7 +227,15 @@ public class EndpointsTab extends JPanel {
                 @Override
                 public boolean include(Entry<? extends EndpointTableModel, ? extends Integer> entry) {
                     int modelRow = entry.getIdentifier();
-                    Endpoint endpoint = context.getEndpoints().get(modelRow);
+                    Endpoint endpoint;
+                    try {
+                        // The shared list can be swapped by a background parse worker
+                        // (resetModel: clear()+addAll()); treat an out-of-range row as
+                        // non-matching rather than throwing on the EDT.
+                        endpoint = context.getEndpoints().get(modelRow);
+                    } catch (IndexOutOfBoundsException e) {
+                        return false;
+                    }
                     return endpoint != null && matchesEndpoint(endpoint, needle);
                 }
             });
@@ -257,7 +267,9 @@ public class EndpointsTab extends JPanel {
 
     private List<Endpoint> getSelectedEndpoints() {
         List<Endpoint> selected = new ArrayList<>();
-        List<Endpoint> endpoints = context.getEndpoints();
+        // Snapshot once so the bounds check and get() are consistent even if a
+        // background parse worker swaps the shared list (resetModel: clear()+addAll()).
+        List<Endpoint> endpoints = new ArrayList<>(context.getEndpoints());
         for (int viewRow : endpointsTable.getSelectedRows()) {
             int modelRow = endpointsTable.convertRowIndexToModel(viewRow);
             if (modelRow >= 0 && modelRow < endpoints.size()) {
