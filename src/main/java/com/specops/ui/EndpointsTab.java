@@ -16,6 +16,8 @@ import javax.swing.event.DocumentListener;
 import javax.swing.RowFilter;
 import javax.swing.table.TableRowSorter;
 import java.awt.*;
+import java.awt.event.InputEvent;
+import java.awt.event.KeyEvent;
 import java.awt.event.MouseAdapter;
 import java.awt.event.MouseEvent;
 import java.text.SimpleDateFormat;
@@ -255,6 +257,12 @@ public class EndpointsTab extends JPanel {
     private void addRightClickMenu() {
         JPopupMenu popupMenu = new JPopupMenu();
 
+        JMenuItem selectAllItem = new JMenuItem("Select All");
+        selectAllItem.addActionListener(e -> endpointsTable.selectAll());
+        popupMenu.add(selectAllItem);
+
+        popupMenu.addSeparator();
+
         JMenuItem sendToRepeaterItem = new JMenuItem("Send to Repeater");
         sendToRepeaterItem.addActionListener(e -> sendSelectedToRepeater());
         popupMenu.add(sendToRepeaterItem);
@@ -269,20 +277,31 @@ public class EndpointsTab extends JPanel {
         pingEndpointsItem.addActionListener(e -> pingSelectedEndpointsWorker());
         popupMenu.add(pingEndpointsItem);
 
+        // Cross-platform popup trigger. On macOS the trigger can arrive on press OR release,
+        // and a Control-click is reported as BUTTON1 (so isRightMouseButton would miss it).
+        // e.isPopupTrigger() is the portable check.
         endpointsTable.addMouseListener(new MouseAdapter() {
             @Override
-            public void mousePressed(MouseEvent e) {
-                if (SwingUtilities.isRightMouseButton(e)) {
-                    int row = endpointsTable.rowAtPoint(e.getPoint());
-                    if (row >= 0 && !endpointsTable.isRowSelected(row)) {
-                        endpointsTable.setRowSelectionInterval(row, row);
-                    }
-                    if (endpointsTable.getSelectedRowCount() > 0) {
-                        popupMenu.show(e.getComponent(), e.getX(), e.getY());
-                    }
+            public void mousePressed(MouseEvent e) { maybeShowPopup(e); }
+
+            @Override
+            public void mouseReleased(MouseEvent e) { maybeShowPopup(e); }
+
+            private void maybeShowPopup(MouseEvent e) {
+                if (!e.isPopupTrigger()) return;
+                int row = endpointsTable.rowAtPoint(e.getPoint());
+                if (row >= 0 && !endpointsTable.isRowSelected(row)) {
+                    endpointsTable.setRowSelectionInterval(row, row);
                 }
+                popupMenu.show(e.getComponent(), e.getX(), e.getY());
             }
         });
+
+        // Make select-all reliable from the keyboard on every platform:
+        // Cmd+A on macOS, Ctrl+A elsewhere, and bind both so neither chord surprises the user.
+        InputMap im = endpointsTable.getInputMap(JComponent.WHEN_FOCUSED);
+        im.put(KeyStroke.getKeyStroke(KeyEvent.VK_A, Toolkit.getDefaultToolkit().getMenuShortcutKeyMaskEx()), "selectAll");
+        im.put(KeyStroke.getKeyStroke(KeyEvent.VK_A, InputEvent.CTRL_DOWN_MASK), "selectAll");
     }
 
     /**
