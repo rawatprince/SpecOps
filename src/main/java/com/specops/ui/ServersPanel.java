@@ -27,6 +27,7 @@ public class ServersPanel extends JPanel {
     private final VariablesModel varsModel;
     private final JCheckBox iterateAllServers;
     private final JLabel resolvedUrlBadge = new JLabel("Server: (none)");
+    private final JTextField hostField = new JTextField();
 
     /**
      * EDT-only guard. Set while we are programmatically repopulating our own
@@ -59,12 +60,44 @@ public class ServersPanel extends JPanel {
             context.setIterateAcrossAllServers(iterateAllServers.isSelected());
         });
 
+        // Base host: resolves relative server URLs (e.g. "/api/v3"). Auto-filled when loading
+        // from URL; editable so specs loaded from a file or pasted can still target a host.
+        hostField.setToolTipText("Base host for relative server URLs (e.g. /api/v3). "
+                + "Auto-filled from the URL you load; set it here for file/pasted specs.");
+        hostField.setText(context.getApiHost() == null ? "" : context.getApiHost());
+        Runnable commitHost = () -> {
+            if (refreshing) return; // programmatic sync, not a user edit
+            String h = hostField.getText() == null ? "" : hostField.getText().trim();
+            context.setApiHost(h.isEmpty() ? null : h);
+            context.notifyServersChanged();
+        };
+        hostField.addActionListener(e -> commitHost.run());
+        hostField.addFocusListener(new java.awt.event.FocusAdapter() {
+            @Override
+            public void focusLost(java.awt.event.FocusEvent e) { commitHost.run(); }
+        });
+
+        JLabel serverLbl = new JLabel("Server");
+        JLabel hostLbl = new JLabel("Base host");
+        Dimension lblSize = new Dimension(70, hostLbl.getPreferredSize().height);
+        serverLbl.setPreferredSize(lblSize);
+        hostLbl.setPreferredSize(lblSize);
+
+        JPanel serverRow = new JPanel(new BorderLayout(8, 8));
+        serverRow.add(serverLbl, BorderLayout.WEST);
+        serverRow.add(serverCombo, BorderLayout.CENTER);
+
+        JPanel hostRow = new JPanel(new BorderLayout(8, 8));
+        hostRow.add(hostLbl, BorderLayout.WEST);
+        hostRow.add(hostField, BorderLayout.CENTER);
+
+        JPanel southStack = new JPanel(new BorderLayout(8, 8));
+        southStack.add(hostRow, BorderLayout.NORTH);
+        southStack.add(iterateAllServers, BorderLayout.SOUTH);
+
         JPanel north = new JPanel(new BorderLayout(8, 8));
-        JPanel left = new JPanel(new BorderLayout(8, 8));
-        left.add(new JLabel("Server"), BorderLayout.WEST);
-        left.add(serverCombo, BorderLayout.CENTER);
-        north.add(left, BorderLayout.CENTER);
-        north.add(iterateAllServers, BorderLayout.SOUTH);
+        north.add(serverRow, BorderLayout.NORTH);
+        north.add(southStack, BorderLayout.CENTER);
         add(north, BorderLayout.NORTH);
 
         varsModel = new VariablesModel();
@@ -88,6 +121,7 @@ public class ServersPanel extends JPanel {
                 loadServersIntoCombo();
                 selectInitialServerIndex();
                 iterateAllServers.setSelected(context.isIterateAcrossAllServers());
+                hostField.setText(context.getApiHost() == null ? "" : context.getApiHost());
                 installEnumEditors();
                 reloadVariables();
                 updateResolvedBadge();

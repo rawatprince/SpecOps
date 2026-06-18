@@ -67,7 +67,7 @@ public class RequestFactory {
             if (serverUrl.startsWith("/")) {
                 String host = context.getApiHost();
                 if (host == null) {
-                    context.api.logging().logToError("Server URL is relative, but no host is defined. Please set one in the Specification tab.");
+                    context.api.logging().logToError("Server URL is relative, but no host is defined. Set the 'Base host' field in the Servers tab.");
                     return null;
                 }
                 parsed = new URL(new URL(host), serverUrl);
