@@ -1,8 +1,11 @@
 name: CI
 
 on:
+  # Only run the push build for the mainline; branch work is covered by the
+  # pull_request trigger below. Without this, pushing a feature/* branch that
+  # already has an open PR fires BOTH push and pull_request, running CI twice.
   push:
-    branches: [ main, 'feature/*' ]
+    branches: [ main ]
   pull_request:
     branches: [ main, 'feature/*' ]
   workflow_dispatch:
@@ -20,7 +23,7 @@ jobs:
     runs-on: ubuntu-latest
     strategy:
       matrix:
-        java: [ '17' ]
+        java: [ '21' ]
     steps:
       - name: Checkout
         uses: actions/checkout@v4
@@ -52,6 +55,9 @@ jobs:
         with:
           name: test-report-${{ github.sha }}
           path: build/reports/tests/test/**
+          # The project has no test sources yet, so the report dir may be
+          # absent; don't warn/fail the step when there is nothing to upload.
+          if-no-files-found: ignore
           retention-days: 7
 
       - name: Upload fat jar

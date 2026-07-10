@@ -19,7 +19,7 @@ jobs:
         uses: actions/setup-java@v4
         with:
           distribution: temurin
-          java-version: '17'
+          java-version: '21'
 
       - name: Setup Gradle
         uses: gradle/actions/setup-gradle@v3
@@ -48,4 +48,6 @@ jobs:
         with:
           name: "SpecOps ${{ github.ref_name }}"
           generate_release_notes: true
-          files: build/libs/*.jar
+          files: |
+            build/libs/*.jar
+            build/libs/*.sha256
