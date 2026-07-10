@@ -29,6 +29,8 @@ import java.util.List;
 import java.util.Locale;
 import java.util.Map;
 import java.util.Set;
+import java.util.concurrent.CancellationException;
+import java.util.concurrent.ExecutionException;
 import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 import java.util.concurrent.atomic.AtomicInteger;
@@ -61,6 +63,7 @@ public class EndpointsTab extends JPanel {
 
     private final AtomicBoolean pauseRequested = new AtomicBoolean(false);
     private final AtomicBoolean stopAfterCurrent = new AtomicBoolean(false);
+    private final AtomicBoolean shutdownRequested = new AtomicBoolean(false);
     private final Object pauseLock = new Object();
 
     public EndpointsTab(SpecOpsContext context, JTabbedPane mainPane) {
@@ -438,46 +441,51 @@ public class EndpointsTab extends JPanel {
 
         activeWorker = new SwingWorker<>() {
             @Override
-            protected Void doInBackground() {
-                int done = 0;
-                AtomicInteger completedCount = new AtomicInteger(0);
+            protected Void doInBackground() throws Exception {
+                try {
+                    int done = 0;
+                    AtomicInteger completedCount = new AtomicInteger(0);
 
-                for (Map.Entry<Endpoint, List<HttpRequest>> entry : plan.entrySet()) {
-                    if (stopAfterCurrent.get()) break;
-
-                    Endpoint endpoint = entry.getKey();
-                    List<HttpRequest> requests = entry.getValue();
-                    if (requests == null || requests.isEmpty()) {
-                        continue;
-                    }
-
-                    for (HttpRequest request : requests) {
-                        waitIfPaused();
+                    for (Map.Entry<Endpoint, List<HttpRequest>> entry : plan.entrySet()) {
                         if (stopAfterCurrent.get()) break;
 
-                        try {
-                            var requestResponse = context.api.http().sendRequest(request);
-                            String timestamp = new SimpleDateFormat("HH:mm:ss").format(new Date());
-                            HttpResponse response = requestResponse.response();
-                            HttpRequest finalRequest = requestResponse.request();
-
-                            publish(new AttackResult(endpoint, finalRequest, response, timestamp));
-                        } catch (Throwable t) {
-                            String timestamp = new SimpleDateFormat("HH:mm:ss").format(new Date());
-                            publish(new AttackResult(endpoint, request, null, timestamp));
+                        Endpoint endpoint = entry.getKey();
+                        List<HttpRequest> requests = entry.getValue();
+                        if (requests == null || requests.isEmpty()) {
+                            continue;
                         }
 
-                        done++;
-                        completedCount.set(done);
-                        int pct = (int) Math.round((done * 100.0) / totalCount);
-                        setProgress(pct);
-                        updateCountAndEtaOnEDT(done, totalCount, startNano);
+                        for (HttpRequest request : requests) {
+                            waitIfPaused();
+                            if (stopAfterCurrent.get()) break;
+
+                            try {
+                                var requestResponse = context.api.http().sendRequest(request);
+                                String timestamp = new SimpleDateFormat("HH:mm:ss").format(new Date());
+                                HttpResponse response = requestResponse.response();
+                                HttpRequest finalRequest = requestResponse.request();
+
+                                publish(new AttackResult(endpoint, finalRequest, response, timestamp));
+                            } catch (Throwable t) {
+                                String timestamp = new SimpleDateFormat("HH:mm:ss").format(new Date());
+                                publish(new AttackResult(endpoint, request, null, timestamp));
+                            }
+
+                            done++;
+                            completedCount.set(done);
+                            int pct = (int) Math.round((done * 100.0) / totalCount);
+                            setProgress(pct);
+                            updateCountAndEtaOnEDT(done, totalCount, startNano);
+                        }
                     }
+                    if (stopAfterCurrent.get() && completedCount.get() < totalCount) {
+                        runOnEdt(() -> statusLabel.setText("Status: Stopping"));
+                    }
+                    return null;
+                } catch (Exception | Error failure) {
+                    context.api.logging().logToError("Unexpected failure while pinging endpoints.", failure);
+                    throw failure;
                 }
-                if (stopAfterCurrent.get() && completedCount.get() < totalCount) {
-                    runOnEdt(() -> statusLabel.setText("Status: Stopping"));
-                }
-                return null;
             }
 
             @Override
@@ -489,26 +497,61 @@ public class EndpointsTab extends JPanel {
 
             @Override
             protected void done() {
-                btnPing.setEnabled(true);
-                btnCancel.setEnabled(false);
-                btnPause.setEnabled(false);
-                btnPause.setText("Pause");
-                pauseRequested.set(false);
-                statusLabel.setText("Status: Idle");
+                try {
+                    get();
 
-                if (mainPane != null) {
-                    // Adjust index if your tab order changes
-                    mainPane.setSelectedIndex(6);
-                }
-
-                if (stopAfterCurrent.get()) {
-                    JOptionPane.showMessageDialog(EndpointsTab.this,
-                            "Ping stopped after current request. See Attack Results for partial results.",
-                            "Stopped", JOptionPane.WARNING_MESSAGE);
-                } else {
-                    JOptionPane.showMessageDialog(EndpointsTab.this,
-                            "Ping complete. See Attack Results for details.",
-                            "Done", JOptionPane.INFORMATION_MESSAGE);
+                    resetWorkerControls();
+                    if (stopAfterCurrent.get()) {
+                        statusLabel.setText("Status: Stopped");
+                        if (!shutdownRequested.get()) {
+                            showAttackResults();
+                            JOptionPane.showMessageDialog(EndpointsTab.this,
+                                    "Ping stopped after current request. See Attack Results for partial results.",
+                                    "Stopped", JOptionPane.WARNING_MESSAGE);
+                        }
+                    } else {
+                        statusLabel.setText("Status: Complete");
+                        if (!shutdownRequested.get()) {
+                            showAttackResults();
+                            JOptionPane.showMessageDialog(EndpointsTab.this,
+                                    "Ping complete. See Attack Results for details.",
+                                    "Done", JOptionPane.INFORMATION_MESSAGE);
+                        }
+                    }
+                } catch (CancellationException ex) {
+                    resetWorkerControls();
+                    statusLabel.setText(shutdownRequested.get()
+                            ? "Status: Cancelled on unload"
+                            : "Status: Cancelled");
+                    if (!shutdownRequested.get()) {
+                        JOptionPane.showMessageDialog(EndpointsTab.this,
+                                "Ping was cancelled.",
+                                "Cancelled", JOptionPane.WARNING_MESSAGE);
+                    }
+                } catch (InterruptedException ex) {
+                    Thread.currentThread().interrupt();
+                    resetWorkerControls();
+                    statusLabel.setText("Status: Interrupted");
+                    context.api.logging().logToError("Interrupted while completing endpoint ping.", ex);
+                    if (!shutdownRequested.get()) {
+                        JOptionPane.showMessageDialog(EndpointsTab.this,
+                                "Ping completion was interrupted. See the extension error log for details.",
+                                "Interrupted", JOptionPane.ERROR_MESSAGE);
+                    }
+                } catch (ExecutionException ex) {
+                    resetWorkerControls();
+                    statusLabel.setText("Status: Failed");
+                    Throwable cause = ex.getCause() == null ? ex : ex.getCause();
+                    if (!shutdownRequested.get()) {
+                        String detail = cause.getMessage();
+                        if (detail == null || detail.isBlank()) {
+                            detail = cause.getClass().getSimpleName();
+                        }
+                        JOptionPane.showMessageDialog(EndpointsTab.this,
+                                "Ping failed unexpectedly: " + detail
+                                        + "\nSee the extension error log for details.",
+                                "Ping failed", JOptionPane.ERROR_MESSAGE);
+                    }
                 }
             }
         };
@@ -523,6 +566,21 @@ public class EndpointsTab extends JPanel {
         });
 
         activeWorker.execute();
+    }
+
+    private void resetWorkerControls() {
+        btnPing.setEnabled(true);
+        btnCancel.setEnabled(false);
+        btnPause.setEnabled(false);
+        btnPause.setText("Pause");
+        pauseRequested.set(false);
+    }
+
+    private void showAttackResults() {
+        if (mainPane != null) {
+            // Adjust index if your tab order changes
+            mainPane.setSelectedIndex(6);
+        }
     }
 
     private void updateCountAndEtaOnEDT(int done, int total, long startNano) {
@@ -567,6 +625,7 @@ public class EndpointsTab extends JPanel {
      * Thread-safe (no UI mutation): wakes a paused worker and interrupts a running one.
      */
     public void shutdown() {
+        shutdownRequested.set(true);
         stopAfterCurrent.set(true);
         pauseRequested.set(false);
         synchronized (pauseLock) {

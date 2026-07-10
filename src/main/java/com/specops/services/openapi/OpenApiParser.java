@@ -5,6 +5,9 @@ import com.specops.domain.Endpoint;
 import com.specops.domain.Parameter;
 import io.swagger.v3.oas.models.OpenAPI;
 import io.swagger.v3.oas.models.Operation;
+import io.swagger.v3.oas.models.PathItem;
+import io.swagger.v3.oas.models.examples.Example;
+import io.swagger.v3.oas.models.media.MediaType;
 import io.swagger.v3.oas.models.media.Schema;
 import io.swagger.v3.oas.models.parameters.RequestBody;
 import io.swagger.v3.parser.OpenAPIV3Parser;
@@ -37,14 +40,47 @@ public class OpenApiParser {
         return (i >= 0 && i < 4096) || (j >= 0 && j < 4096);
     }
 
+    /** A non-empty value supplied by a specification that can flow into a generated request. */
+    public record AutomaticValue(
+            String endpoint,
+            String location,
+            String parameter,
+            String source,
+            String value) {
+
+        public AutomaticValue {
+            endpoint = Objects.requireNonNullElse(endpoint, "");
+            location = Objects.requireNonNullElse(location, "");
+            parameter = Objects.requireNonNullElse(parameter, "");
+            source = Objects.requireNonNullElse(source, "");
+            value = Objects.requireNonNullElse(value, "");
+        }
+    }
+
+    /** A successfully parsed model that has not yet been applied to the shared context. */
+    public record ParsedSpecification(
+            OpenAPI openAPI,
+            List<Endpoint> endpoints,
+            Map<String, Parameter> parameters,
+            List<AutomaticValue> automaticValues) {
+
+        public ParsedSpecification {
+            Objects.requireNonNull(openAPI, "openAPI");
+            endpoints = List.copyOf(endpoints);
+            parameters = Map.copyOf(parameters);
+            automaticValues = List.copyOf(automaticValues);
+        }
+    }
+
     /**
      * Parses the given spec content. Tries OAS3 first, then falls back to Swagger 2.0
-     * with in-memory conversion to OAS3. On success, updates the context model.
+     * with in-memory conversion to OAS3. The result is staged: parsing never replaces
+     * the shared model or parameter store.
      */
-    public boolean parse(String specContent) {
+    public Optional<ParsedSpecification> parse(String specContent) {
         if (specContent == null || specContent.trim().isEmpty()) {
             context.api.logging().logToError("Failed to parse OpenAPI specification. Issues: empty content");
-            return false;
+            return Optional.empty();
         }
 
         ParseOptions options = new ParseOptions();
@@ -85,7 +121,7 @@ public class OpenApiParser {
             String errorMessage = "Failed to parse OpenAPI specification.";
             if (!messages.isEmpty()) errorMessage += " Issues: " + String.join(", ", messages);
             context.api.logging().logToError(errorMessage);
-            return false;
+            return Optional.empty();
         }
 
         final OpenAPI oas = openAPI;
@@ -101,6 +137,7 @@ public class OpenApiParser {
         // Build data model
         List<Endpoint> endpoints = new ArrayList<>();
         Map<String, Parameter> parameters = new HashMap<>();
+        Set<AutomaticValue> automaticValues = new LinkedHashSet<>();
 
         oas.getPaths().forEach((path, pathItem) -> {
             if (pathItem == null) return;
@@ -108,7 +145,11 @@ public class OpenApiParser {
             pathItem.readOperationsMap().forEach((method, operation) -> {
                 if (operation == null) return;
 
-                endpoints.add(new Endpoint(path, method, operation));
+                Endpoint endpoint = new Endpoint(path, method, operation);
+                endpoints.add(endpoint);
+
+                collectEffectiveParameterValues(oas, path, method, pathItem, operation, automaticValues);
+                collectRequestBodyValues(oas, path, method, operation, automaticValues);
 
                 // classic parameter locations
                 if (pathItem.getParameters() != null) {
@@ -130,18 +171,276 @@ public class OpenApiParser {
             });
         });
 
-        context.resetModel(oas, endpoints, parameters);
-        return true;
+        collectStoredParameterValues(parameters, automaticValues);
+
+        return Optional.of(new ParsedSpecification(
+                oas,
+                endpoints,
+                parameters,
+                new ArrayList<>(automaticValues)
+        ));
+    }
+
+    private void collectEffectiveParameterValues(
+            OpenAPI openAPI,
+            String path,
+            PathItem.HttpMethod method,
+            PathItem pathItem,
+            Operation operation,
+            Set<AutomaticValue> out) {
+
+        Map<String, io.swagger.v3.oas.models.parameters.Parameter> effective = new LinkedHashMap<>();
+        addEffectiveParameters(openAPI, effective, pathItem.getParameters());
+        addEffectiveParameters(openAPI, effective, operation.getParameters());
+
+        String endpoint = endpointLabel(method, path);
+        for (io.swagger.v3.oas.models.parameters.Parameter parameter : effective.values()) {
+            String location = Objects.requireNonNullElse(parameter.getIn(), "parameter");
+            String name = Objects.requireNonNullElse(parameter.getName(), "(unnamed)");
+
+            addAutomaticValue(out, endpoint, location, name,
+                    "parameter example", parameter.getExample());
+            collectNamedExamples(openAPI, out, endpoint, location, name,
+                    "parameter example", parameter.getExamples());
+
+            Schema<?> schema = derefSchema(openAPI, parameter.getSchema());
+            if (schema != null) {
+                addSchemaValues(out, endpoint, location, name, schema);
+            }
+        }
+    }
+
+    private void addEffectiveParameters(
+            OpenAPI openAPI,
+            Map<String, io.swagger.v3.oas.models.parameters.Parameter> effective,
+            List<io.swagger.v3.oas.models.parameters.Parameter> candidates) {
+
+        if (candidates == null) return;
+        for (io.swagger.v3.oas.models.parameters.Parameter candidate : candidates) {
+            io.swagger.v3.oas.models.parameters.Parameter parameter = derefParam(candidate, openAPI);
+            if (parameter == null || parameter.getName() == null || parameter.getIn() == null) continue;
+            effective.put(parameter.getIn() + "|" + parameter.getName(), parameter);
+        }
+    }
+
+    private void collectRequestBodyValues(
+            OpenAPI openAPI,
+            String path,
+            PathItem.HttpMethod method,
+            Operation operation,
+            Set<AutomaticValue> out) {
+
+        RequestBody requestBody = derefRequestBody(openAPI, operation.getRequestBody());
+        if (requestBody == null || requestBody.getContent() == null) return;
+
+        String endpoint = endpointLabel(method, path);
+        for (Map.Entry<String, MediaType> entry : requestBody.getContent().entrySet()) {
+            String mediaName = Objects.requireNonNullElse(entry.getKey(), "(unspecified media type)");
+            MediaType media = entry.getValue();
+            if (media == null) continue;
+
+            addAutomaticValue(out, endpoint, "body", mediaName + " $",
+                    "media example", media.getExample());
+            collectNamedExamples(openAPI, out, endpoint, "body", mediaName + " $",
+                    "media example", media.getExamples());
+
+            collectSchemaValues(
+                    openAPI,
+                    out,
+                    endpoint,
+                    "body",
+                    mediaName,
+                    "$",
+                    media.getSchema(),
+                    Collections.newSetFromMap(new IdentityHashMap<>()),
+                    0
+            );
+        }
+    }
+
+    private void collectNamedExamples(
+            OpenAPI openAPI,
+            Set<AutomaticValue> out,
+            String endpoint,
+            String location,
+            String parameter,
+            String source,
+            Map<String, Example> examples) {
+
+        if (examples == null) return;
+        examples.forEach((name, unresolved) -> {
+            Example example = derefExample(openAPI, unresolved);
+            if (example != null) {
+                addAutomaticValue(out, endpoint, location, parameter,
+                        source + " " + Objects.requireNonNullElse(name, "(unnamed)"), example.getValue());
+            }
+        });
+    }
+
+    private void collectSchemaValues(
+            OpenAPI openAPI,
+            Set<AutomaticValue> out,
+            String endpoint,
+            String location,
+            String mediaName,
+            String path,
+            Schema<?> unresolved,
+            Set<Schema<?>> activeSchemas,
+            int depth) {
+
+        if (unresolved == null || depth > MAX_SCHEMA_DEPTH) return;
+        Schema<?> schema = derefSchema(openAPI, unresolved);
+        if (schema == null || !activeSchemas.add(schema)) return;
+
+        try {
+            addSchemaValues(out, endpoint, location, mediaName + " " + path, schema);
+
+            if (schema.getProperties() != null) {
+                schema.getProperties().forEach((name, child) -> collectSchemaValues(
+                        openAPI,
+                        out,
+                        endpoint,
+                        location,
+                        mediaName,
+                        appendPropertyPath(path, name),
+                        child,
+                        activeSchemas,
+                        depth + 1
+                ));
+            }
+            if (schema.getItems() != null) {
+                collectSchemaValues(openAPI, out, endpoint, location, mediaName,
+                        path + "[]", schema.getItems(), activeSchemas, depth + 1);
+            }
+            if (schema.getAdditionalProperties() instanceof Schema<?> additionalSchema) {
+                collectSchemaValues(openAPI, out, endpoint, location, mediaName,
+                        appendPropertyPath(path, "{*}"), additionalSchema, activeSchemas, depth + 1);
+            }
+
+            collectComposedSchemaValues(openAPI, out, endpoint, location, mediaName, path,
+                    "allOf", schema.getAllOf(), activeSchemas, depth);
+            collectComposedSchemaValues(openAPI, out, endpoint, location, mediaName, path,
+                    "oneOf", schema.getOneOf(), activeSchemas, depth);
+            collectComposedSchemaValues(openAPI, out, endpoint, location, mediaName, path,
+                    "anyOf", schema.getAnyOf(), activeSchemas, depth);
+        } finally {
+            activeSchemas.remove(schema);
+        }
+    }
+
+    private void collectComposedSchemaValues(
+            OpenAPI openAPI,
+            Set<AutomaticValue> out,
+            String endpoint,
+            String location,
+            String mediaName,
+            String path,
+            String composition,
+            List<Schema> schemas,
+            Set<Schema<?>> activeSchemas,
+            int depth) {
+
+        if (schemas == null) return;
+        for (int i = 0; i < schemas.size(); i++) {
+            collectSchemaValues(openAPI, out, endpoint, location, mediaName,
+                    path + " (" + composition + " " + (i + 1) + ")",
+                    schemas.get(i), activeSchemas, depth + 1);
+        }
+    }
+
+    private static void addSchemaValues(
+            Set<AutomaticValue> out,
+            String endpoint,
+            String location,
+            String parameter,
+            Schema<?> schema) {
+
+        addAutomaticValue(out, endpoint, location, parameter, "schema default", schema.getDefault());
+        addAutomaticValue(out, endpoint, location, parameter, "schema example", schema.getExample());
+        if (schema.getEnum() != null && !schema.getEnum().isEmpty()) {
+            addAutomaticValue(out, endpoint, location, parameter, "first enum", schema.getEnum().get(0));
+        }
+    }
+
+    private static void addAutomaticValue(
+            Set<AutomaticValue> out,
+            String endpoint,
+            String location,
+            String parameter,
+            String source,
+            Object rawValue) {
+
+        if (rawValue == null) return;
+        String value = String.valueOf(rawValue);
+        if (!value.isEmpty()) {
+            out.add(new AutomaticValue(endpoint, location, parameter, source, value));
+        }
+    }
+
+    private static void collectStoredParameterValues(
+            Map<String, Parameter> parameters,
+            Set<AutomaticValue> out) {
+        for (Parameter parameter : parameters.values()) {
+            if (parameter == null || !parameter.hasValue()) continue;
+
+            String source;
+            if (!parameter.getDefaultValue().isEmpty()) {
+                source = "stored schema default";
+            } else if (!parameter.getExampleValue().isEmpty()) {
+                source = "stored example";
+            } else if (parameter.hasEnum()) {
+                source = "stored first enum";
+            } else {
+                source = "stored parser value";
+            }
+
+            String name = "body".equalsIgnoreCase(parameter.getIn())
+                    && !parameter.getJsonPath().isEmpty()
+                    ? parameter.getJsonPath()
+                    : parameter.getName();
+            addAutomaticValue(
+                    out,
+                    "(global parameter store)",
+                    parameter.getIn(),
+                    name,
+                    source,
+                    parameter.getValue()
+            );
+        }
+    }
+
+    private static String appendPropertyPath(String path, String property) {
+        return "$".equals(path) ? "$." + property : path + "." + property;
+    }
+
+    private static String endpointLabel(PathItem.HttpMethod method, String path) {
+        return (method == null ? "" : method.name()) + " " + Objects.requireNonNullElse(path, "");
+    }
+
+    private Example derefExample(OpenAPI openAPI, Example example) {
+        if (example == null || openAPI.getComponents() == null
+                || openAPI.getComponents().getExamples() == null) return example;
+        Set<String> visited = new HashSet<>();
+        while (example.get$ref() != null && visited.add(example.get$ref())) {
+            String name = example.get$ref().substring(example.get$ref().lastIndexOf('/') + 1);
+            Example resolved = openAPI.getComponents().getExamples().get(name);
+            if (resolved == null || resolved == example) break;
+            example = resolved;
+        }
+        return example;
     }
 
     private io.swagger.v3.oas.models.parameters.Parameter derefParam(
             io.swagger.v3.oas.models.parameters.Parameter p, OpenAPI openAPI) {
-        if (p == null || p.get$ref() == null) return p;
-        String name = p.get$ref().substring(p.get$ref().lastIndexOf('/') + 1);
-        if (openAPI.getComponents() != null && openAPI.getComponents().getParameters() != null) {
+        if (p == null || openAPI.getComponents() == null
+                || openAPI.getComponents().getParameters() == null) return p;
+        Set<String> visited = new HashSet<>();
+        while (p.get$ref() != null && visited.add(p.get$ref())) {
+            String name = p.get$ref().substring(p.get$ref().lastIndexOf('/') + 1);
             io.swagger.v3.oas.models.parameters.Parameter resolved =
                     openAPI.getComponents().getParameters().get(name);
-            return resolved != null ? resolved : p;
+            if (resolved == null || resolved == p) break;
+            p = resolved;
         }
         return p;
     }
@@ -168,7 +467,7 @@ public class OpenApiParser {
                 p.setEnumValues(enums);
             }
         }
-        if (p.getExampleValue() == null && parsedParam.getExample() != null) {
+        if (p.getExampleValue().isEmpty() && parsedParam.getExample() != null) {
             p.setExampleValue(String.valueOf(parsedParam.getExample()));
         }
 
@@ -220,21 +519,29 @@ public class OpenApiParser {
     }
 
     private RequestBody derefRequestBody(OpenAPI oas, RequestBody rb) {
-        if (rb == null || rb.get$ref() == null) return rb;
-        String name = rb.get$ref().substring(rb.get$ref().lastIndexOf('/') + 1);
-        return oas.getComponents() != null
-                && oas.getComponents().getRequestBodies() != null
-                ? oas.getComponents().getRequestBodies().getOrDefault(name, rb)
-                : rb;
+        if (rb == null || oas.getComponents() == null
+                || oas.getComponents().getRequestBodies() == null) return rb;
+        Set<String> visited = new HashSet<>();
+        while (rb.get$ref() != null && visited.add(rb.get$ref())) {
+            String name = rb.get$ref().substring(rb.get$ref().lastIndexOf('/') + 1);
+            RequestBody resolved = oas.getComponents().getRequestBodies().get(name);
+            if (resolved == null || resolved == rb) break;
+            rb = resolved;
+        }
+        return rb;
     }
 
     private Schema<?> derefSchema(OpenAPI oas, Schema<?> s) {
-        if (s == null || s.get$ref() == null) return s;
-        String name = s.get$ref().substring(s.get$ref().lastIndexOf('/') + 1);
-        return oas.getComponents() != null
-                && oas.getComponents().getSchemas() != null
-                ? oas.getComponents().getSchemas().getOrDefault(name, s)
-                : s;
+        if (s == null || oas.getComponents() == null
+                || oas.getComponents().getSchemas() == null) return s;
+        Set<String> visited = new HashSet<>();
+        while (s.get$ref() != null && visited.add(s.get$ref())) {
+            String name = s.get$ref().substring(s.get$ref().lastIndexOf('/') + 1);
+            Schema<?> resolved = oas.getComponents().getSchemas().get(name);
+            if (resolved == null || resolved == s) break;
+            s = resolved;
+        }
+        return s;
     }
 
     private String normalizeMediaKey(String mt) {
