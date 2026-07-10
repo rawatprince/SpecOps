@@ -263,7 +263,7 @@ public class ResultsTab extends JPanel {
         respEditor.setResponse(result.getResponse());
 
         SwingUtilities.invokeLater(() -> {
-            JDialog dialog = new JDialog((Frame) null, "Request / Response", false);
+            JDialog dialog = new JDialog(ui.swingUtils().suiteFrame(), "Request / Response", false);
             dialog.setDefaultCloseOperation(WindowConstants.DISPOSE_ON_CLOSE);
             JTabbedPane tabs = new JTabbedPane();
             tabs.addTab("Request", reqEditor.uiComponent());

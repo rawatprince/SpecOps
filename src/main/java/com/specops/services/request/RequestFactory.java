@@ -39,6 +39,29 @@ public class RequestFactory {
         this.context = context;
     }
 
+    /**
+     * Strip CR/LF from a header name. A malicious spec can supply a header
+     * parameter (or security-scheme) whose name carries CRLF; without this the
+     * newline injects into the generated request. Note that any reserved-header
+     * guard MUST run on the sanitized name, otherwise a name such as "Ho\nst"
+     * evades the guard and then collapses onto a protected header.
+     */
+    private static String sanitizeHeaderName(String name) {
+        return name == null ? null : name.replace("\r", "").replace("\n", "");
+    }
+
+    /** Headers that are managed by the request builder / transport and must never be set from a spec. */
+    private static boolean isReservedHeaderName(String nameLc) {
+        return nameLc.equals("host") || nameLc.equals("content-length")
+                || nameLc.equals("transfer-encoding") || nameLc.equals("connection");
+    }
+
+    private static HttpHeader sanitizedHeader(String name, String value) {
+        String sanitizedName = sanitizeHeaderName(name);
+        String sanitizedValue = value == null ? null : value.replace("\r", "").replace("\n", "");
+        return httpHeader(sanitizedName, sanitizedValue);
+    }
+
     public HttpRequest buildRequest(Endpoint endpoint) {
         Map<String, Parameter> paramStore = context.getGlobalParameterStore();
 
@@ -104,7 +127,7 @@ public class RequestFactory {
             if ((secure && port != 443) || (!secure && port != 80)) {
                 hostValue = hostValue + ":" + port;
             }
-            headers.add(httpHeader("Host", hostValue));
+            headers.add(sanitizedHeader("Host", hostValue));
         }
 
         // Body from OpenAPI examples or synthesized from schema, then overlay global store overrides for in="body"
@@ -171,9 +194,11 @@ public class RequestFactory {
                 }
                 if (!match) continue;
 
-                // Guardrails for dangerous or managed headers
-                String nameLc = r.name.toLowerCase(Locale.ROOT);
-                if (nameLc.equals("host") || nameLc.equals("content-length") || nameLc.equals("transfer-encoding") || nameLc.equals("connection")) {
+                // Guardrails for dangerous or managed headers. Guard on the
+                // sanitized name so a CRLF-laced rule name cannot evade it.
+                String ruleName = sanitizeHeaderName(r.name);
+                String nameLc = ruleName == null ? "" : ruleName.toLowerCase(Locale.ROOT);
+                if (isReservedHeaderName(nameLc)) {
                     continue;
                 }
 
@@ -193,12 +218,12 @@ public class RequestFactory {
                     }
                 }
 
-                boolean exists = headers.stream().anyMatch(h -> h.name().equalsIgnoreCase(r.name));
+                boolean exists = headers.stream().anyMatch(h -> h.name().equalsIgnoreCase(ruleName));
                 if (exists && r.overwrite) {
-                    headers.removeIf(h -> h.name().equalsIgnoreCase(r.name));
-                    headers.add(httpHeader(r.name, value));
+                    headers.removeIf(h -> h.name().equalsIgnoreCase(ruleName));
+                    headers.add(sanitizedHeader(ruleName, value));
                 } else if (!exists) {
-                    headers.add(httpHeader(r.name, value));
+                    headers.add(sanitizedHeader(ruleName, value));
                 }
             }
         }
@@ -333,8 +358,14 @@ public class RequestFactory {
             Parameter stored = findParam(store, "header", specParam.getName());
             String value = stored != null ? stored.getValue() : null;
 
-            String nlc = specParam.getName() != null ? specParam.getName().toLowerCase(Locale.ROOT) : "";
-            if (nlc.equals("host") || nlc.equals("content-length") || nlc.equals("transfer-encoding") || nlc.equals("connection")) {
+            // Sanitize the name BEFORE the reserved-header guard so a CRLF-laced
+            // name (e.g. "Ho\nst") cannot slip past the guard and then collapse
+            // onto Host / Content-Length / Transfer-Encoding / Connection.
+            String name = sanitizeHeaderName(specParam.getName());
+            String nlc = name != null ? name.toLowerCase(Locale.ROOT) : "";
+            // Reject names that are empty (or collapse to empty after sanitizing,
+            // e.g. a param literally named "\r\n") or reserved before emitting.
+            if (name == null || name.isEmpty() || isReservedHeaderName(nlc)) {
                 continue;
             }
 
@@ -348,9 +379,9 @@ public class RequestFactory {
             }
 
             if (value != null && !value.isEmpty()) {
-                boolean isCT = "content-type".equalsIgnoreCase(specParam.getName());
+                boolean isCT = "content-type".equals(nlc);
                 boolean alreadyHasCT = isCT && headers.stream().anyMatch(h -> h.name().equalsIgnoreCase("Content-Type"));
-                if (!alreadyHasCT) headers.add(httpHeader(specParam.getName(), value));
+                if (!alreadyHasCT) headers.add(sanitizedHeader(name, value));
             }
         }
     }
@@ -385,7 +416,7 @@ public class RequestFactory {
                     : existing.endsWith(";") ? existing + " " + cookieString
                     : existing + "; " + cookieString;
             headers.removeIf(h -> h.name().equalsIgnoreCase("Cookie"));
-            headers.add(httpHeader("Cookie", combined));
+            headers.add(sanitizedHeader("Cookie", combined));
         }
     }
 
@@ -548,8 +579,7 @@ public class RequestFactory {
                     String name = scheme.getName() != null ? scheme.getName() : "api_key";
 
                     if (in == SecurityScheme.In.HEADER) {
-                        upsertHeader(headers, name, token);
-                        didInject = true;
+                        didInject = upsertHeader(headers, name, token) || didInject;
                     } else if (in == SecurityScheme.In.COOKIE) {
                         upsertCookieKV(headers, name, token);
                         didInject = true;
@@ -559,17 +589,14 @@ public class RequestFactory {
                 case HTTP -> {
                     String schemeNameLc = scheme.getScheme() == null ? "" : scheme.getScheme().toLowerCase(Locale.ROOT);
                     if ("bearer".equals(schemeNameLc)) {
-                        upsertHeader(headers, "Authorization", "Bearer " + token);
-                        didInject = true;
+                        didInject = upsertHeader(headers, "Authorization", "Bearer " + token) || didInject;
                     } else if ("basic".equals(schemeNameLc)) {
-                        upsertHeader(headers, "Authorization", "Basic " + token);
-                        didInject = true;
+                        didInject = upsertHeader(headers, "Authorization", "Basic " + token) || didInject;
                     }
                 }
 
                 case OAUTH2, OPENIDCONNECT -> {
-                    upsertHeader(headers, "Authorization", "Bearer " + token);
-                    didInject = true;
+                    didInject = upsertHeader(headers, "Authorization", "Bearer " + token) || didInject;
                 }
 
                 default -> {
@@ -581,9 +608,23 @@ public class RequestFactory {
     }
 
     // helpers: upsert header and cookie KV
-    private void upsertHeader(List<HttpHeader> headers, String name, String value) {
-        headers.removeIf(h -> h.name().equalsIgnoreCase(name));
-        headers.add(httpHeader(name, value));
+
+    /**
+     * Insert (replacing any existing header of the same name) a header, unless the
+     * name is empty or reserved once sanitized. Returns {@code true} only when a
+     * header was actually inserted, so callers can track whether authentication
+     * was really applied (a rejected name must not mark an OR requirement as met).
+     */
+    private boolean upsertHeader(List<HttpHeader> headers, String name, String value) {
+        // Sanitize first, then refuse reserved headers: a spec-controlled
+        // security-scheme name (e.g. an apiKey named "Host" or "Ho\nst") must
+        // not be able to inject or suppress a transport-managed header.
+        String sanitizedName = sanitizeHeaderName(name);
+        if (sanitizedName == null || sanitizedName.isEmpty()) return false;
+        if (isReservedHeaderName(sanitizedName.toLowerCase(Locale.ROOT))) return false;
+        headers.removeIf(h -> h.name().equalsIgnoreCase(sanitizedName));
+        headers.add(sanitizedHeader(sanitizedName, value));
+        return true;
     }
 
     private void upsertCookieKV(List<HttpHeader> headers, String cookieName, String cookieValue) {
@@ -610,7 +651,7 @@ public class RequestFactory {
                 .map(e -> e.getKey() + "=" + e.getValue())
                 .collect(java.util.stream.Collectors.joining("; "));
         headers.removeIf(h -> h.name().equalsIgnoreCase("Cookie"));
-        headers.add(httpHeader("Cookie", joined));
+        headers.add(sanitizedHeader("Cookie", joined));
     }
 
     private java.util.Set<String> getAuthQueryParamNamesForEndpoint(Endpoint endpoint) {
@@ -688,22 +729,22 @@ public class RequestFactory {
                 if (norm.equals("application/x-www-form-urlencoded")) {
                     Map<String, Object> m = materializeMapFromSchema(schema, 0);
                     applyBodyOverridesToMap(m, store, "");
-                    return new BuiltBody(renderWwwForm(m), List.of(httpHeader("Content-Type", headerKey)));
+                    return new BuiltBody(renderWwwForm(m), List.of(sanitizedHeader("Content-Type", headerKey)));
                 } else if (norm.equals("multipart/form-data")) {
                     Map<String, Object> m = materializeMapFromSchema(schema, 0);
                     applyBodyOverridesToMap(m, store, "");
                     String boundary = "----SpecOps" + UUID.randomUUID();
                     String body = renderMultipart(m, boundary, media.getEncoding()) + "\r\n";
-                    return new BuiltBody(body, List.of(httpHeader("Content-Type", headerKey + "; boundary=" + boundary)));
+                    return new BuiltBody(body, List.of(sanitizedHeader("Content-Type", headerKey + "; boundary=" + boundary)));
                 } else if (isJsonLike(norm) || norm.equals("*/*") || norm.isEmpty()) {
                     String json = materializeJsonFromSchema(schema, 0);
                     json = applyBodyOverridesToJson(json, store, schema);
                     String ctHeader = isJsonLike(norm) ? headerKey : "application/json";
-                    return new BuiltBody(json, List.of(httpHeader("Content-Type", ctHeader)));
+                    return new BuiltBody(json, List.of(sanitizedHeader("Content-Type", ctHeader)));
                 } else {
                     String json = materializeJsonFromSchema(schema, 0);
                     json = applyBodyOverridesToJson(json, store, schema);
-                    return new BuiltBody(json, List.of(httpHeader("Content-Type", "application/json")));
+                    return new BuiltBody(json, List.of(sanitizedHeader("Content-Type", "application/json")));
                 }
             }
 
@@ -712,28 +753,28 @@ public class RequestFactory {
                 if (norm.equals("application/x-www-form-urlencoded")) {
                     Map<String, Object> m = coerceToMap(example);
                     applyBodyOverridesToMap(m, store, "");
-                    return new BuiltBody(renderWwwForm(m), List.of(httpHeader("Content-Type", headerKey)));
+                    return new BuiltBody(renderWwwForm(m), List.of(sanitizedHeader("Content-Type", headerKey)));
                 } else if (norm.equals("multipart/form-data")) {
                     Map<String, Object> m = coerceToMap(example);
                     applyBodyOverridesToMap(m, store, "");
                     String boundary = "----SpecOps" + UUID.randomUUID();
                     String body = renderMultipart(m, boundary, media.getEncoding()) + "\r\n";
-                    return new BuiltBody(body, List.of(httpHeader("Content-Type", headerKey + "; boundary=" + boundary)));
+                    return new BuiltBody(body, List.of(sanitizedHeader("Content-Type", headerKey + "; boundary=" + boundary)));
                 } else if (isJsonLike(norm) || norm.equals("*/*") || norm.isEmpty()) {
                     String ctHeader = isJsonLike(norm) ? headerKey : "application/json";
                     String json = renderJson(example);
                     json = applyBodyOverridesToJson(json, store, schema);
-                    return new BuiltBody(json, List.of(httpHeader("Content-Type", ctHeader)));
+                    return new BuiltBody(json, List.of(sanitizedHeader("Content-Type", ctHeader)));
                 } else if (norm.startsWith("text/")) {
                     String s = String.valueOf(example);
                     String rootOverride = readBodyOverride(store, "");
                     if (rootOverride != null) s = rootOverride;
-                    return new BuiltBody(s, List.of(httpHeader("Content-Type", headerKey)));
+                    return new BuiltBody(s, List.of(sanitizedHeader("Content-Type", headerKey)));
                 } else {
                     String s = String.valueOf(example);
                     String rootOverride = readBodyOverride(store, "");
                     if (rootOverride != null) s = rootOverride;
-                    return new BuiltBody(s, List.of(httpHeader("Content-Type", headerKey)));
+                    return new BuiltBody(s, List.of(sanitizedHeader("Content-Type", headerKey)));
                 }
             }
         }
@@ -744,7 +785,7 @@ public class RequestFactory {
             if (schema != null) {
                 String json = materializeJsonFromSchema(schema, 0);
                 json = applyBodyOverridesToJson(json, store, schema);
-                return new BuiltBody(json, List.of(httpHeader("Content-Type", "application/json")));
+                return new BuiltBody(json, List.of(sanitizedHeader("Content-Type", "application/json")));
             }
         }
 
@@ -1449,7 +1490,7 @@ public class RequestFactory {
                 if ((secure && port != 443) || (!secure && port != 80)) {
                     hostValue = hostValue + ":" + port;
                 }
-                newHeaders.add(httpHeader("Host", hostValue));
+                newHeaders.add(sanitizedHeader("Host", hostValue));
 
                 HttpRequest copy = HttpRequest.httpRequest()
                         .withService(svc)
