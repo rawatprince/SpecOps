@@ -191,7 +191,7 @@ public class SpecificationTab extends JPanel {
     }
 
     private void parseSpecification() {
-        String specContent = specArea.getContents().toString();
+        String specContent = new String(specArea.getContents().getBytes(), StandardCharsets.UTF_8);
         if (specContent.trim().isEmpty()) {
             JOptionPane.showMessageDialog(this, "Specification content is empty.", "Error", JOptionPane.ERROR_MESSAGE);
             return;
